@@ -154,14 +154,14 @@ fn main() {
         // FIXME: implement saving menu (waiting on #58)
         // Q for save
         if rl.is_key_pressed(KeyboardKey::KEY_Q) {
-            let buf = rmp_serde::to_vec(&world).unwrap();
-            fs::write("world.bin", buf);
+            let buf = rmp_serde::to_vec(&world).expect("serialize failed");
+            fs::write("world.bin", buf).expect("writing save to file failed");
         }
 
         // L for load
         if rl.is_key_pressed(KeyboardKey::KEY_L) {
             // FIXME: implement proper error handling
-            let bytes = fs::read("world.bin").unwrap();
+            let bytes = fs::read("world.bin").expect("reading save from file failed");
             world = rmp_serde::from_slice(&bytes).expect("deserialize failed");
 
             // reset world renderer
