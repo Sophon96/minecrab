@@ -107,7 +107,7 @@ jobs:
 
       - name: Build
         env:
-          SDL3_ROOT: C:/SDL3-3.4.10/cmake/
+          SDL3_DIR: C:/SDL3-3.4.10/cmake/
         run: cargo build --verbose
 
   test-windows:
@@ -131,5 +131,5 @@ jobs:
 
       - name: Test
         env:
-          SDL3_ROOT: C:/SDL3-3.4.10/cmake/
+          SDL3_DIR: C:/SDL3-3.4.10/cmake/
         run: cargo test --verbose
