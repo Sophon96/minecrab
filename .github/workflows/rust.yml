@@ -106,7 +106,9 @@ jobs:
             echo "C:/SDL3-3.4.10/lib/x64/" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
 
       - name: Build
-        run: SDL3_ROOT="C:/SDL3-3.4.10/cmake/" cargo build --verbose
+        env:
+          SDL3_ROOT: C:/SDL3-3.4.10/cmake/
+        run: cargo build --verbose
 
   test-windows:
     runs-on: windows-latest
@@ -128,4 +130,6 @@ jobs:
             echo "C:/SDL3-3.4.10/lib/x64/" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
 
       - name: Test
-        run: SDL3_ROOT="C:/SDL3-3.4.10/cmake/" cargo test --verbose
+        env:
+          SDL3_ROOT: C:/SDL3-3.4.10/cmake/
+        run: cargo test --verbose
