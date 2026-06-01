@@ -108,6 +108,7 @@ jobs:
       - name: Build
         env:
           SDL3_DIR: C:/SDL3-3.4.10/cmake/
+          LINK: SDL3.lib
         run: cargo build --verbose
 
   test-windows:
@@ -132,4 +133,5 @@ jobs:
       - name: Test
         env:
           SDL3_DIR: C:\SDL3-3.4.10\cmake\
+          LINK: SDL3.lib
         run: cargo test --verbose
