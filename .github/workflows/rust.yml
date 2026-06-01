@@ -101,7 +101,7 @@ jobs:
 
       - name: Dependencies
         run: |
-            curl -L "https://github.com/libsdl-org/SDL/releases/download/release-3.4.10/SDL3-3.4.10.zip" --output C:\SDL3-3.4.10.zip
+            curl -L "https://github.com/libsdl-org/SDL/releases/download/release-3.4.10/SDL3-devel-3.4.10-VC.zip" --output C:\SDL3-3.4.10.zip
             7z x C:\SDL3-3.4.10.zip -oC:\
             echo "C:/SDL3-3.4.10/lib/x64/" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
 
@@ -125,11 +125,11 @@ jobs:
 
       - name: Dependencies
         run: |
-            curl -L "https://github.com/libsdl-org/SDL/releases/download/release-3.4.10/SDL3-3.4.10.zip" --output C:\SDL3-3.4.10.zip
+            curl -L "https://github.com/libsdl-org/SDL/releases/download/release-3.4.10/SDL3-devel-3.4.10-VC.zip" --output C:\SDL3-3.4.10.zip
             7z x C:\SDL3-3.4.10.zip -oC:\
             echo "C:/SDL3-3.4.10/lib/x64/" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
 
       - name: Test
         env:
-          SDL3_DIR: C:/SDL3-3.4.10/cmake/
+          SDL3_DIR: C:\SDL3-3.4.10\cmake\
         run: cargo test --verbose
