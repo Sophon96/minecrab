@@ -34,6 +34,9 @@ pub struct Chunk {
 pub struct ChunkGenThread {
     input_tx: Sender<(i64, i64, i64, Option<Chunk>)>,
     result_rx: Receiver<(i64, i64, i64, Option<Chunk>, VecMesh)>,
+
+    // XXX: We will probably never need to join this
+    #[expect(dead_code)]
     chunk_gen_thread: JoinHandle<()>,
 }
 
@@ -52,12 +55,11 @@ impl ChunkGenThread {
         }
     }
 
-    pub fn send(&self, t: (i64, i64, i64, Option<Chunk>)) -> Result<(), mpsc::SendError<(i64, i64, i64, Option<Chunk>)>> {
+    pub fn send(
+        &self,
+        t: (i64, i64, i64, Option<Chunk>),
+    ) -> Result<(), mpsc::SendError<(i64, i64, i64, Option<Chunk>)>> {
         self.input_tx.send(t)
-    }
-
-    pub fn recv(&self) -> Result<(i64, i64, i64, Option<Chunk>, VecMesh), mpsc::RecvError> {
-        self.result_rx.recv()
     }
 
     pub fn try_recv(&self) -> Result<(i64, i64, i64, Option<Chunk>, VecMesh), mpsc::TryRecvError> {
@@ -69,7 +71,7 @@ impl ChunkGenThread {
 pub struct World {
     #[serde(skip, default = "ChunkGenThread::new")]
     cgt: ChunkGenThread,
-    
+
     chunks_in_progress: HashSet<(i64, i64, i64)>,
 
     pub chunks: HashMap<(i64, i64, i64), Chunk>,
@@ -222,7 +224,8 @@ impl World {
                 unsafe { mesh.upload(false) };
                 world_renderer.add_mesh(result.0, result.1, result.2, mesh);
 
-                self.chunks_in_progress.remove(&(result.0, result.1, result.2));
+                self.chunks_in_progress
+                    .remove(&(result.0, result.1, result.2));
             }
             Err(_) => {
                 // we don't really care if it's disconnected or empty
@@ -238,8 +241,11 @@ impl World {
     ) {
         eprintln!("Terrain generation chunk started");
         loop {
-            let (cx, cy, cz, existing_chunk) = input_rx.recv().unwrap();
-            
+            let Ok((cx, cy, cz, existing_chunk)) = input_rx.recv() else {
+                eprintln!("chunk gen thread: input channel hung up, goodbye.");
+                return;
+            };
+
             if let Some(chunk) = existing_chunk {
                 // Chunk was provided, only build the mesh
                 let vmesh = worldmesh::remote_build_geometry_chunk(&chunk, cx, cy, cz);
@@ -256,7 +262,7 @@ impl World {
                         World::remote_generate_terrain_column(&mut chunk, wx, wz, cy);
                     }
                 }
-                
+
                 let vmesh = worldmesh::remote_build_geometry_chunk(&chunk, cx, cy, cz);
                 result_tx.send((cx, cy, cz, Some(chunk), vmesh)).unwrap();
             }
@@ -307,7 +313,7 @@ impl World {
             for dy in &delta {
                 for dz in &delta {
                     let (cx, cy, cz) = (cx + dx, cy + dy, cz + dz);
-                    
+
                     if !self.chunks.contains_key(&(cx, cy, cz)) {
                         self.dispatch_chunk_gen(cx, cy, cz);
                     }
