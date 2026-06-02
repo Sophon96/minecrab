@@ -1,4 +1,5 @@
 use noise::{NoiseFn, SuperSimplex};
+
 use raylib::prelude::*;
 
 use std::collections::{HashMap, HashSet};
@@ -38,7 +39,6 @@ pub struct World {
     chunks_in_progress: HashSet<(i64, i64, i64)>,
 
     pub chunks: HashMap<(i64, i64, i64), Chunk>,
-    pub ticks: u64,
 }
 
 impl Chunk {
@@ -99,27 +99,14 @@ impl World {
             result_rx,
             chunk_gen_thread,
             chunks_in_progress: HashSet::new(),
-            ticks: 0,
         }
     }
 
     pub fn get_chunk_coords_of_block(x: i64, y: i64, z: i64) -> (i64, i64, i64) {
         (
-            if x >= 0 {
-                x / CHUNK_SIZE
-            } else {
-                (x + 1) / CHUNK_SIZE - 1
-            },
-            if y >= 0 {
-                y / CHUNK_SIZE
-            } else {
-                (y + 1) / CHUNK_SIZE - 1
-            },
-            if z >= 0 {
-                z / CHUNK_SIZE
-            } else {
-                (z + 1) / CHUNK_SIZE - 1
-            },
+            if x >= 0 { x / CHUNK_SIZE } else { (x + 1) / CHUNK_SIZE - 1 },
+            if y >= 0 { y / CHUNK_SIZE } else { (y + 1) / CHUNK_SIZE - 1 },
+            if z >= 0 { z / CHUNK_SIZE } else { (z + 1) / CHUNK_SIZE - 1 }
         )
     }
 

@@ -1,54 +1,35 @@
 use std::collections::VecDeque;
-use std::ptr;
 
 use raylib::prelude::*;
 
 mod player;
 mod render;
 mod world;
+mod game;
 
-use player::{Player, update_camera_angle, update_camera_position};
-use world::collision::{VoxelRaycastHit, voxel_raycast};
+use player::Player;
 use world::generation::World;
 
-use crate::render::mesh_tools;
-use crate::render::pause_menu::PauseMenu;
-use crate::render::skybox::{create_skybox_mesh, day_amount};
-use crate::render::worldmesh::{WorldRenderer};
+use render::{mesh_tools, skybox};
+use mesh_tools::{MaterialBuilder, draw_mesh2};
+use render::worldmesh::WorldRenderer;
+use MaterialMapIndex::*;
+
+use std::time::Instant;
+
+use crate::{game::{GameData, Sounds}, render::pause_menu::PauseMenu};
+
+const DBG_FONT_SIZE: i32 = 16;
 
 const WINDOW_WIDTH: i32 = 1280;
 const WINDOW_HEIGHT: i32 = 720;
-
-const TICK_LENGTH: f32 = 0.025; // 40 ticks per second
-
-// Generate one chunk every [FRAMES_PER_CHUNK] frames so world generation isn't
-// exceedingly laggy at the beginning.
-const FRAMES_PER_CHUNK: i32 = 1;
-
-fn tick(world: &mut World, player: &mut Player, rl: &mut RaylibHandle) {
-    update_camera_position(player, rl);
-    //terrain generation should be in here too, and a lot of other stuff.
-    //probably need some kind of (dreaded) GameState object to keep the
-    //parameter list from being ridiculous.
-}
-
-fn hit_voxel_from_player(player: &mut Player, world: &mut World) -> Option<VoxelRaycastHit> {
-    // Return a hit from where the player is looking
-    let p = player.camera.position;
-
-    let mut dir = player.camera.target - player.camera.position;
-    dir.normalize();
-
-    voxel_raycast(&world, p.x, p.y, p.z, dir.x, dir.y, dir.z, Some(100.))
-}
-
-fn update_mesh_on_hit(world: &mut World, h: VoxelRaycastHit) {
-    // Update a mesh for a given voxel in hit
-    let (cx, cy, cz) = World::get_chunk_coords_of_block(h.x, h.y, h.z);
-    world.dispatch_mesh_chunk(cx, cy, cz);
-}
+const TICKRATE: u32 = 40;
+const TICK_LENGTH: f32 = 1./(TICKRATE as f32);
 
 fn main() {
+    // XXX: RaylibHandle may not be dropped before any of the raylib resources!!
+    // if it ever goes in a struct with other raylib stuff, it needs to be the
+    // last member so it gets dropped last. Ask me how I know.
     let (mut rl, thread) = raylib::init()
         .size(WINDOW_WIDTH, WINDOW_HEIGHT)
         .title("Minecrab")
@@ -58,221 +39,181 @@ fn main() {
 
     // Disable exit on esc (default raylib behavior)
     rl.set_exit_key(None);
+    
+    let mut skybox_mesh: Mesh = skybox::create_skybox_mesh();
 
-    let mut player = Player::new();
+    let mut skybox_material = MaterialBuilder::init(&mut rl, &thread)
+        .vert("src/shader/skybox.vert")
+        .frag("src/shader/skybox.frag")
+        .build();
 
-    let mut debug_display = false; // toggle
-    let mut debug_frame_times: VecDeque<f32> = VecDeque::new();
-    let mut debug_frame_time_stats: Option<(f32, f32, f32)> = None;
+    let block_material = MaterialBuilder::init(&mut rl, &thread)
+        .vert("src/shader/block.vert")
+        .frag("src/shader/block.frag")
+        .map(MATERIAL_MAP_ALBEDO, "assets/full-textures.png")
+        .build();
 
-    let mut next_tick_in = 0_f32; // time until we run update_camera()
+    // create a static reference to audio_stream and sounds.
+    // not sure if there's a better way to do this.
+    let audio_stream = Box::leak(Box::new(
+        RaylibAudio::init_audio_device().expect("init audio")
+    ));
+    let sounds = Box::leak(Box::new(
+        Sounds {
+            menu_open: audio_stream
+                .new_sound(&"assets/audio/menu-open.ogg")
+                .expect(&"load sound"),
+            menu_close: audio_stream
+                .new_sound(&"assets/audio/menu-close.ogg")
+                .expect(&"load sound"),
+        }
+    ));
+    
+    // don't you dare create a "new"
+    // or "init" method for this struct
+    let mut gd = GameData {
+        sounds,
+        pause_menu: PauseMenu::new(),
+        player: Player::new(),
+        world: World::new(),
+        world_renderer: WorldRenderer::new(block_material),
+        debug_text: String::new(),
+        debug_info_shown: false,
+        paused: true,
+        should_quit: false,
+        tick_counter: 0,
+        frame_counter: 0,
+        last_tick_time: 0.,
+        last_frame_total_time: 0.,
+        debug_frame_times: VecDeque::from([0.;300]),
+    };
 
-    let audio_stream = RaylibAudio::init_audio_device().expect("Can init audio.");
-    let open_sound = audio_stream
-        .new_sound(&"assets/audio/menu-open.ogg")
-        .expect("Load sound");
-    let close_sound = audio_stream
-        .new_sound(&"assets/audio/menu-close.ogg")
-        .expect("Load sound");
+    let mut next_tick_in = 0_f32;
 
-    let mut t = rl
-        .load_texture(&thread, "assets/full-textures.png")
-        .expect("Should load 'assets/full-textures.png'.");
+    while !gd.should_quit {
+        let frame_start = Instant::now();
+        
+        next_tick_in -= gd.last_frame_total_time;
 
-    t.gen_texture_mipmaps();
-
-    let texture: ffi::Texture = unsafe { t.unwrap() };
-
-    let mut skybox_mesh: Mesh = create_skybox_mesh();
-    let mut skybox_material = rl.load_material_default(&thread);
-    let mut skybox_shader = rl.load_shader(
-        &thread,
-        Some("src/shader/skybox.vert"),
-        Some("src/shader/skybox.frag"),
-    );
-    skybox_material.shader = *skybox_shader.as_ref();
-
-    let mut material = rl.load_material_default(&thread);
-    let mut block_shader = rl.load_shader(
-        &thread,
-        Some("src/shader/block.vert"),
-        Some("src/shader/block.frag"),
-    );
-    material.shader = *block_shader.as_ref();
-
-    let maps = material.maps_mut();
-    maps[MaterialMapIndex::MATERIAL_MAP_ALBEDO as usize].texture = texture;
-
-    let mut world = World::new();
-    let mut world_renderer: WorldRenderer = WorldRenderer::new(material);
-
-    let mut frame: i32 = 0;
-
-    let mut window_should_close = false;
-    let mut pause_menu = PauseMenu::new();
-
-    while !window_should_close {
-        window_should_close |= rl.window_should_close();
-
-        pause_menu.update(&mut rl);
-        window_should_close |= pause_menu.should_quit();
-
-        if pause_menu.is_running() {
-            update_camera_angle(&mut player, &mut rl);
-
-            next_tick_in -= rl.get_frame_time();
-            while next_tick_in < 0_f32 {
-                tick(&mut world, &mut player, &mut rl);
-                next_tick_in += TICK_LENGTH;
-
-                world.ticks += 1
-            }
-
-            if rl.is_key_pressed(KeyboardKey::KEY_BACKSLASH) { // toggle debug menu
-                debug_display = !debug_display;
-                if debug_display { open_sound.play() } else { close_sound.play() };
-            }
-
-            // Debug: add frame times to frame time graph
-            if debug_frame_times.len() > 300 {
-                debug_frame_times.pop_front();
-
-                // compute some basic stats
-                // technically this does mean we are one frame delayed
-                // but it saves me from writing another if statement
-                // FIXME: this looks like a lot of computation but I don't think
-                // it's actually costing us any performance
-                let mut sorted_ft = debug_frame_times.iter().collect::<Vec<_>>();
-                sorted_ft.sort_by(|a, b| f32::total_cmp(*b, *a));
-                debug_frame_time_stats = Some((*sorted_ft[2], *sorted_ft[29], *sorted_ft[149]));
-            }
-            debug_frame_times.push_back(rl.get_frame_time());
-
-            // Remove block
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                let hit = hit_voxel_from_player(&mut player, &mut world);
-
-                if let Some(h) = hit {
-                    world.set_block_data(h.x, h.y, h.z, world::blocks::BlockData::AIR);
-                    update_mesh_on_hit(&mut world, h);
-                }
-            }
-
-            // Add stone block
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT) {
-                let hit = hit_voxel_from_player(&mut player, &mut world);
-
-                if let Some(h) = hit {
-                    world.set_block_data(
-                        h.x + h.normal_x as i64,
-                        h.y + h.normal_y as i64,
-                        h.z + h.normal_z as i64,
-                        world::blocks::BlockData::STONE
-                    );
-                    update_mesh_on_hit(&mut world, h);
-                }
-            }
-
-            let Vector3 {
-                x: px,
-                y: py,
-                z: pz,
-            } = player.camera.position;
-            world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, 1);
-            if frame % FRAMES_PER_CHUNK == 0 {
-                world.poll_chunk_gen_thread(&mut world_renderer);
-            }
-            frame += 1;
+        if next_tick_in < 0_f32 {
+            let tick_start = Instant::now();
+            game::tick(&mut gd, &mut rl);
+            gd.tick_counter += 1;
+            gd.last_tick_time = tick_start.elapsed().as_secs_f32();
+            next_tick_in += TICK_LENGTH;
         }
 
-        rl.draw(&thread, |mut d| {
-            d.clear_background(Color::LIGHTBLUE);
+        //on a scale of zero to one, how close are we to the next tick.
+        let interp = 1. - (next_tick_in/TICK_LENGTH).clamp(0., 1.);
 
-            // Skybox
+        // FIXME?
+        // Because rl is part of gd and rl.draw takes a mutable reference to it,
+        // we can't borrow gd inside of the closure. Instead, we borrow each
+        // member we need to mutate inside the closure separately here.
+        // This makes it impossible to refactor parts of drawing (that need
+        // access to gd) into their own functions. Not sure how to fix. -m
+        let player = &mut gd.player;
+        let world_renderer = &mut gd.world_renderer;
 
-            // So that the skybox doesn't move with the player but still keeps
-            // the player's rotation, we create an independent copy of the camera
-            // which is shifted back toward the origin always.
-            let mut skybox_cam = player.camera.clone();
-            skybox_cam.position = Vector3::new(0.0, 0.0, 0.0);
-            skybox_cam.target -= player.camera.position;
+        // Update pause menu
+        gd.pause_menu.update(&mut rl);
+        gd.paused = !gd.pause_menu.is_running();
+        gd.should_quit |= gd.pause_menu.should_quit();
 
-            let day_amount: f32 = day_amount(world.ticks);
-            let skybox_loc = skybox_shader.get_shader_location("dayAmount");
-            let block_loc = block_shader.get_shader_location("dayAmount");
-            skybox_shader.set_shader_value(skybox_loc, day_amount);
-            block_shader.set_shader_value(block_loc, day_amount);
+        /* Begin rendering */
+        let mut d = rl.begin_drawing(&thread);
+        d.clear_background(Color::LIGHTBLUE);
 
-            d.draw_mode3D(skybox_cam, |mut d2, _camera| {
-                d2.draw_mesh(
-                    &mut skybox_mesh,
-                    skybox_material.clone(),
-                    Matrix::identity(),
-                );
-            });
+        // Skybox
 
-            world_renderer.render(&mut d, player.camera);
+        // So that the skybox doesn't move with the player but still keeps
+        // the player's rotation, we create an independent copy of the camera
+        // which is shifted back toward the origin always.
+        let mut skybox_cam = player.camera.clone();
+        skybox_cam.position = Vector3::new(0.0, 0.0, 0.0);
+        skybox_cam.target -= player.camera.position;
 
-            let w = d.get_render_width();
-            let h = d.get_render_height();
+        let day_amount: f32 = skybox::day_amount(gd.tick_counter);
+        let skybox_loc = skybox_material.shader().get_shader_location("dayAmount");
+        let block_loc = world_renderer.material.shader().get_shader_location("dayAmount");
+        skybox_material.shader_mut().set_shader_value(skybox_loc, day_amount);
+        world_renderer.material.shader_mut().set_shader_value(block_loc, day_amount);
 
-            // Crosshair
-            d.draw_line_ex(
-                rvec2(w / 2 - 10, h / 2),
-                rvec2(w / 2 + 10, h / 2),
-                3.0,
-                Color::WHITESMOKE,
+        d.draw_mode3D(skybox_cam, |d2, _camera| {
+            draw_mesh2(
+                &d2,
+                &mut skybox_mesh,
+                &skybox_material,
+                Matrix::identity(),
             );
-
-            d.draw_line_ex(
-                rvec2(w / 2, h / 2 - 10),
-                rvec2(w / 2, h / 2 + 10),
-                3.0,
-                Color::WHITESMOKE,
-            );
-
-            if debug_display {
-                let mut debug_info = String::new();
-                debug_info += &format!(
-                    "Camera position: {:.4} {:.4} {:.4}\n",
-                    player.camera.position.x, player.camera.position.y, player.camera.position.z
-                );
-                debug_info += &format!("FPS: {}\n", d.get_fps());
-                let p = player.camera.position;
-                let mut dir = player.camera.target - player.camera.position;
-                dir.normalize();
-                let hit = voxel_raycast(&world, p.x, p.y, p.z, dir.x, dir.y, dir.z, Some(100.));
-                debug_info += &format!(
-                    "Looking at block: {}\n",
-                    hit.map_or(String::from("--"), |h| format!(
-                        "{:?} - {:.4} {:.4} {:.4}",
-                        world.get_block_data(h.x, h.y, h.z),
-                        h.x,
-                        h.y,
-                        h.z
-                    ))
-                );
-                debug_info += &format!("Frames elapsed: {}\n", frame);
-                d.draw_text(&debug_info, 20, 20, 16, Color::DARKGREEN);
-
-                // Draw frame time stats
-                if let Some((p100, p90, p50)) = debug_frame_time_stats {
-                    let (p100, p90, p50) = (
-                        (p100 * 1000. * 100.).trunc() / 100.,
-                        (p90 * 1000. * 100.).trunc() / 100.,
-                        (p50 * 1000. * 100.).trunc() / 100.
-                    );
-                    d.draw_text(format!("100%: {p100} | 90%: {p90} | 50%: {p50}").as_str(), 20, 100, 12, Color::RED);
-                }
-                // Draw frame time graph
-                for (i, ft) in debug_frame_times.iter().enumerate() {
-                    d.draw_rectangle(i as i32 + 20, 100 + 20, 1, (*ft * 1000.) as i32, Color::RED);
-                }
-                d.draw_line(20, 116 + 20, 320, 116 + 20, Color::GREEN);
-            }
-
-            // Render pause menu
-            pause_menu.render(&mut d);
         });
+
+        // World
+        if !gd.paused { player.update_camera(interp); }
+
+        world_renderer.render(&mut d, player.camera);
+
+        // Crosshair
+        draw_crosshair(&mut d);
+        
+        // Debug Info
+        if gd.debug_info_shown {
+            d.draw_text(&gd.debug_text, 20, 20, DBG_FONT_SIZE, Color::BLACK);
+            let text = if gd.debug_frame_times.len() >= 300 {
+                let mut sorted_ft = gd.debug_frame_times
+                    .iter().collect::<Vec<_>>();
+                sorted_ft.sort_by(|a, b| f32::total_cmp(*b, *a));
+                let p100 = *sorted_ft[0] * 1000.;
+                let p99 = *sorted_ft[2] * 1000.;
+                let p90 = *sorted_ft[29] * 1000.;
+                let p50 = *sorted_ft[149] * 1000.;
+                &format!("frame 100%: {p100:.2} | 99%: {p99:.2} | 90%: {p90:.2} | 50%: {p50:.2}")
+            } else {
+                "waiting for enough frames..."
+            };
+
+            let y = (gd.debug_text.lines().count() as i32) * DBG_FONT_SIZE + 20;
+            d.draw_text(text, 20, y, 12, Color::RED);
+
+            // Draw frame time graph
+            for (i, ft) in gd.debug_frame_times.iter().enumerate() {
+                d.draw_rectangle(i as i32 + 20, y + 20, 1, (*ft * 1000.) as i32, Color::RED);
+            }
+            d.draw_line(20, y + 36, 320, y + 36, Color::DARKGREEN);
+        }
+
+        if gd.paused {
+            gd.pause_menu.render(&mut d);
+        }
+    
+        let frame_compute_time = frame_start.elapsed().as_secs_f32();
+        gd.debug_frame_times.push_back(frame_compute_time);
+        while gd.debug_frame_times.len() > 300 { gd.debug_frame_times.pop_front(); }
+        
+        unsafe { 
+            raylib::ffi::EndDrawing();
+            raylib::ffi::SwapScreenBuffer();
+        }
+    
+        gd.frame_counter += 1;
+        gd.last_frame_total_time = frame_start.elapsed().as_secs_f32();
     }
+}
+
+fn draw_crosshair(d: &mut RaylibDrawHandle) {
+    let w = d.get_render_width();
+    let h = d.get_render_height();
+    d.draw_line_ex(
+        rvec2(w / 2 - 10, h / 2),
+        rvec2(w / 2 + 10, h / 2),
+        3.0,
+        Color::WHITESMOKE,
+    );
+
+    d.draw_line_ex(
+        rvec2(w / 2, h / 2 - 10),
+        rvec2(w / 2, h / 2 + 10),
+        3.0,
+        Color::WHITESMOKE,
+    );
 }

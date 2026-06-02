@@ -17,8 +17,20 @@ const DEFAULT_SPEED: f32 = 0.2;
 const FRICTION: f32 = 0.15;
 const MOUSE_SENS: f32 = 0.005;
 
-// "Player". Controls the current position and their momentum.
+fn get_input_axis(rl: &mut RaylibHandle, neg: KeyboardKey, pos: KeyboardKey) -> f32 {
+    f32::from(rl.is_key_down(pos)) - f32::from(rl.is_key_down(neg))
+}
+
+fn movement_smooth(from: f32, to: f32) -> f32 {
+    from + (to - from) * FRICTION
+}
+
 pub struct Player {
+    pub prev_pos: Vector3,
+    pub next_pos: Vector3,
+    pub prev_fwd: Vector3,
+    pub next_fwd: Vector3,
+
     pub camera: Camera3D,
     pub speed: f32,
     pub momentum: Vector3,
@@ -38,79 +50,88 @@ impl Player {
                 z: view_azim.sin() * view_elev.cos()
             };
 
-        return Player {
-            camera: Camera3D::perspective(
+        let camera = Camera3D::perspective(
                 pos, target,
                 Vector3::new(0.0, 1.0, 0.0),
                 45.0,
-            ),       
+            );
+
+        return Player {
+            prev_pos: pos,
+            next_pos: pos,
+            prev_fwd: target,
+            next_fwd: target,
+            camera,
             speed: DEFAULT_SPEED,
             momentum: Vector3{x: 0.0, y: 0.0, z: 0.0},
             view_azim,
             view_elev,
         };
     }
-}
 
-fn get_input_axis(rl: &mut RaylibHandle, neg: KeyboardKey, pos: KeyboardKey) -> f32 {
-    f32::from(rl.is_key_down(pos)) - f32::from(rl.is_key_down(neg))
-}
+    pub fn update_camera(&mut self, interp: f32) {
+        self.camera.position =
+            self.prev_pos + (self.next_pos - self.prev_pos) * interp;
+        
+        self.camera.target =
+            self.camera.position
+            + self.prev_fwd + (self.next_fwd - self.prev_fwd) * interp;
+    }
 
-/* step from the current velocity towards the new velocity by FRICTION */
-fn movement_smooth(from: f32, to: f32) -> f32 {
-    from + (to - from) * FRICTION
-}
+    pub fn process_tick(&mut self, rl: &mut RaylibHandle) {
+        (self.prev_pos, self.prev_fwd) = (self.next_pos, self.next_fwd);
+        self.handle_input(rl);
+    }
 
-pub fn update_camera_angle(player: &mut Player, rl: &mut RaylibHandle) {
-    let Vector2 { x: dx, y: dy } = rl.get_mouse_delta();
-    
-    player.view_azim += dx * MOUSE_SENS;
-    player.view_elev -= dy * MOUSE_SENS;
+    fn handle_input(&mut self, rl: &mut RaylibHandle) {
+        let Vector2 { x: dx, y: dy } = rl.get_mouse_delta();
 
-    // Avoid vertical singularities
-    player.view_elev = player.view_elev.clamp(-1.57, 1.57);
+        self.view_azim += dx * MOUSE_SENS;
+        self.view_elev -= dy * MOUSE_SENS;
 
-    if rl.is_key_pressed(keys::SPEED_INC) { player.speed *= 2.0; }
-    else if rl.is_key_pressed(keys::SPEED_DEC) { player.speed /= 2.0; }
-}
+        // Avoid vertical singularities
+        self.view_elev = self.view_elev.clamp(-1.57, 1.57);
 
-pub fn update_camera_position(player: &mut Player, rl: &mut RaylibHandle) {
-    let (azim_cos, azim_sin) = (player.view_azim.cos(), player.view_azim.sin());
+        if rl.is_key_pressed(keys::SPEED_INC) { self.speed *= 2.0; }
+        else if rl.is_key_pressed(keys::SPEED_DEC) { self.speed /= 2.0; }
 
-    let flat_forward = Vector3 { x: azim_cos, y: 0.0, z: azim_sin };
-    let right = Vector3 { x: -azim_sin, y: 0.0, z: azim_cos };
-    
-    let (elev_cos, elev_sin) = (player.view_elev.cos(), player.view_elev.sin());
+        let (azim_cos, azim_sin) = (self.view_azim.cos(), self.view_azim.sin());
 
-    let forward = Vector3 {
-        x: azim_cos * elev_cos,
-        y: elev_sin,
-        z: azim_sin * elev_cos,
-    };
+        let flat_forward = Vector3 { x: azim_cos, y: 0.0, z: azim_sin };
+        let right = Vector3 { x: -azim_sin, y: 0.0, z: azim_cos };
+        
+        let (elev_cos, elev_sin) = (self.view_elev.cos(), self.view_elev.sin());
 
-    let ipx = get_input_axis(rl, keys::LEFT, keys::RIGH);
-    let ipy = get_input_axis(rl, keys::DOWN, keys::UPPP);
-    let ipz = get_input_axis(rl, keys::BACK, keys::FORW);
+        let forward = Vector3 {
+            x: azim_cos * elev_cos,
+            y: elev_sin,
+            z: azim_sin * elev_cos,
+        };
 
-    /* for consistent horizontal speed on diagonals. vertical doesn't
-     * count because i don't feel like it should */
-    let (ipx, ipy) = if ipx.abs() + ipy.abs() > 1.0 {
-        (ipx * 0.707, ipy * 0.707)
-    } else {
-        (ipx, ipy)
-    };
-    
-    let raw_momentum = 
-        right * ipx
-        + Vector3::new(0.0, 1.0, 0.0) * ipy
-        + flat_forward * ipz;
+        let ipx = get_input_axis(rl, keys::LEFT, keys::RIGH);
+        let ipy = get_input_axis(rl, keys::DOWN, keys::UPPP);
+        let ipz = get_input_axis(rl, keys::BACK, keys::FORW);
 
-    player.momentum = Vector3 {
-        x: movement_smooth(player.momentum.x, raw_momentum.x),
-        y: movement_smooth(player.momentum.y, raw_momentum.y),
-        z: movement_smooth(player.momentum.z, raw_momentum.z),
-    };
-    
-    player.camera.position += player.momentum * player.speed;
-    player.camera.target = player.camera.position + forward;
+        /* for consistent horizontal speed on diagonals. vertical doesn't
+         * count because i don't feel like it should */
+        let (ipx, ipy) = if ipx.abs() + ipy.abs() > 1.0 {
+            (ipx * 0.707, ipy * 0.707)
+        } else {
+            (ipx, ipy)
+        };
+        
+        let raw_momentum = 
+            right * ipx
+            + Vector3::new(0.0, 1.0, 0.0) * ipy
+            + flat_forward * ipz;
+
+        self.momentum = Vector3 {
+            x: movement_smooth(self.momentum.x, raw_momentum.x),
+            y: movement_smooth(self.momentum.y, raw_momentum.y),
+            z: movement_smooth(self.momentum.z, raw_momentum.z),
+        };
+        
+        self.next_pos += self.momentum * self.speed;
+        self.next_fwd = forward;
+    }
 }
