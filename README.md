@@ -16,6 +16,11 @@ This project is for us to practice our development skills and build something co
 
 ## Build Instructions
 
+> [!WARNING]
+> Due to [a bug](https://github.com/brettchalupa/sola-raylib/issues/57) in the
+current releases of the raylib binding, `pkg-config` must be installed and able
+to find the SDL3 installation in order for the binding to link correctly.
+
 ### macOS
 
 This project requires SDL3 to build. Assuming you have installed SDL3 via
