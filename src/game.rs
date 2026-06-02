@@ -1,5 +1,6 @@
 use raylib::prelude::*;
 use std::collections::VecDeque;
+use std::time::Instant;
 
 use crate::player::Player;
 use crate::render::pause_menu::PauseMenu;
@@ -10,6 +11,9 @@ use crate::world::collision::{VoxelRaycastHit, voxel_raycast};
 
 use KeyboardKey::*;
 use MouseButton::*;
+
+const TICKRATE: u32 = 40;
+const TICK_LENGTH: f32 = 1. / (TICKRATE as f32);
 
 pub struct Sounds<'a> {
     pub menu_open: Sound<'a>,
@@ -23,7 +27,7 @@ pub struct GameData {
     pub should_quit: bool,
 
     pub pause_menu: PauseMenu,
-    
+
     pub player: Player,
     pub world: World,
 
@@ -39,11 +43,12 @@ pub struct GameData {
     pub tick_counter: u64,
     pub frame_counter: u64,
     pub last_tick_time: f32,
+    pub next_tick_in: f32,
 
     // total meaning including time spent waiting, unlike last_tick_time
     // and debug_frame_times which only count the time spent working.
     pub last_frame_total_time: f32,
-    
+
     // commented out to stop dead code warning,
     // not sure if we'll need it later or not.
     //
@@ -51,56 +56,80 @@ pub struct GameData {
     pub sounds: &'static Sounds<'static>
 }
 
-pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
-    unsafe { raylib::ffi::PollInputEvents(); }
-
+pub fn update(gd: &mut GameData, rl: &mut RaylibHandle) {
     gd.should_quit |= rl.window_should_close();
 
+    // Update pause menu
+    gd.pause_menu.update(rl);
+    gd.paused = !gd.pause_menu.is_running();
+    gd.should_quit |= gd.pause_menu.should_quit();
+
+    // Chunk generation
+    let Vector3 { x: px, y: py, z: pz } = gd.player.camera.position;
+    gd.world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, 1);
+    gd.world.poll_chunk_gen_thread(&mut gd.world_renderer);
+
     if !gd.paused {
-        let (world, player) = (&mut gd.world, &mut gd.player);
+        gd.player.handle_input(rl, gd.last_frame_total_time);
+        gd.player.update_camera();
 
-        player.process_tick(rl);
-
-        if rl.is_key_pressed(KEY_BACKSLASH) {
-            gd.debug_info_shown = !gd.debug_info_shown;
-
-            if gd.debug_info_shown { &gd.sounds.menu_open }
-            else { &gd.sounds.menu_close }
-                .play();
-        }
-        
         if rl.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) {
-            let hit = hit_voxel_from_player(player, world);
-            
+            let hit = hit_voxel_from_player(&mut gd.player, &mut gd.world);
+
             if let Some(h) = hit {
-                world.set_block_data(h.x, h.y, h.z, BlockData::AIR);
-                update_mesh_on_hit(world, h);
+                gd.world.set_block_data(h.x, h.y, h.z, BlockData::AIR);
+                update_mesh_on_hit(&mut gd.world, h);
             }
         }
-        
+
         // Add stone block
         if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT) {
-            let hit = hit_voxel_from_player(player, world);
-            
+            let hit = hit_voxel_from_player(&mut gd.player, &mut gd.world);
+
             if let Some(h) = hit {
-                world.set_block_data(
+                gd.world.set_block_data(
                     h.x + h.normal_x as i64,
                     h.y + h.normal_y as i64,
                     h.z + h.normal_z as i64,
                     BlockData::STONE
                 );
-                update_mesh_on_hit(world, h);
+                update_mesh_on_hit(&mut gd.world, h);
             }
         }
-
-        let Vector3 { x: px, y: py, z: pz } = player.camera.position;
-        world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, 1);
-        world.poll_chunk_gen_thread(&mut gd.world_renderer);
-
-        if gd.debug_info_shown {
-            gd.debug_text = debug_info_fmt(gd);
-        }
     }
+
+    // Toggle debug info
+    if rl.is_key_pressed(KEY_BACKSLASH) {
+        gd.debug_info_shown = !gd.debug_info_shown;
+
+        if gd.debug_info_shown { &gd.sounds.menu_open }
+        else { &gd.sounds.menu_close }
+            .play();
+    }
+
+    if gd.debug_info_shown {
+        gd.debug_text = debug_info_fmt(gd);
+    }
+}
+
+pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
+    if gd.paused {
+        return;
+    }
+
+    gd.next_tick_in -= gd.last_frame_total_time;
+    if gd.next_tick_in >= 0. {
+        return;
+    }
+
+    let tick_start = Instant::now();
+
+    // TODO: any updates that are done per-tick go here
+
+    // Update next_tick_in
+    gd.tick_counter += 1;
+    gd.last_tick_time = tick_start.elapsed().as_secs_f32();
+    gd.next_tick_in += TICK_LENGTH;
 }
 
 fn debug_info_fmt(gd: &mut GameData) -> String {

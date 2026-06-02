@@ -21,8 +21,10 @@ fn get_input_axis(rl: &mut RaylibHandle, neg: KeyboardKey, pos: KeyboardKey) -> 
     f32::from(rl.is_key_down(pos)) - f32::from(rl.is_key_down(neg))
 }
 
-fn movement_smooth(from: f32, to: f32) -> f32 {
-    from + (to - from) * FRICTION
+fn movement_smooth(from: f32, to: f32, mult: f32) -> f32 {
+    // FIXME: code style
+    let (least, greatest) = (f32::min(from, to), f32::max(from, to));
+    (from + (to - from) * FRICTION * mult).clamp(least, greatest)
 }
 
 pub struct Player {
@@ -69,21 +71,18 @@ impl Player {
         };
     }
 
-    pub fn update_camera(&mut self, interp: f32) {
+    pub fn update_camera(&mut self) {
         self.camera.position =
-            self.prev_pos + (self.next_pos - self.prev_pos) * interp;
-        
+            self.prev_pos + (self.next_pos - self.prev_pos);
+
         self.camera.target =
             self.camera.position
-            + self.prev_fwd + (self.next_fwd - self.prev_fwd) * interp;
+            + self.prev_fwd + (self.next_fwd - self.prev_fwd);
     }
 
-    pub fn process_tick(&mut self, rl: &mut RaylibHandle) {
+    pub fn handle_input(&mut self, rl: &mut RaylibHandle, dt: f32) {
         (self.prev_pos, self.prev_fwd) = (self.next_pos, self.next_fwd);
-        self.handle_input(rl);
-    }
 
-    fn handle_input(&mut self, rl: &mut RaylibHandle) {
         let Vector2 { x: dx, y: dy } = rl.get_mouse_delta();
 
         self.view_azim += dx * MOUSE_SENS;
@@ -99,7 +98,7 @@ impl Player {
 
         let flat_forward = Vector3 { x: azim_cos, y: 0.0, z: azim_sin };
         let right = Vector3 { x: -azim_sin, y: 0.0, z: azim_cos };
-        
+
         let (elev_cos, elev_sin) = (self.view_elev.cos(), self.view_elev.sin());
 
         let forward = Vector3 {
@@ -119,19 +118,21 @@ impl Player {
         } else {
             (ipx, ipy)
         };
-        
-        let raw_momentum = 
+
+        let raw_momentum =
             right * ipx
             + Vector3::new(0.0, 1.0, 0.0) * ipy
             + flat_forward * ipz;
 
-        self.momentum = Vector3 {
-            x: movement_smooth(self.momentum.x, raw_momentum.x),
-            y: movement_smooth(self.momentum.y, raw_momentum.y),
-            z: movement_smooth(self.momentum.z, raw_momentum.z),
-        };
+        let multiplier = dt / 0.025;
         
-        self.next_pos += self.momentum * self.speed;
+        self.momentum = Vector3 {
+            x: movement_smooth(self.momentum.x, raw_momentum.x, multiplier),
+            y: movement_smooth(self.momentum.y, raw_momentum.y, multiplier),
+            z: movement_smooth(self.momentum.z, raw_momentum.z, multiplier),
+        };
+
+        self.next_pos += self.momentum * self.speed * multiplier;
         self.next_fwd = forward;
     }
 }
