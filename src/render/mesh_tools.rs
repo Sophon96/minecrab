@@ -1,6 +1,69 @@
 use raylib::prelude::*;
 use std::ptr;
 
+// i despise this pattern, not sure why i chose it
+pub struct MaterialBuilder<'a> {
+    rl: &'a mut RaylibHandle,
+    thread: &'a RaylibThread,
+    vert: Option<Box<str>>,
+    frag: Option<Box<str>>,
+    maps: Box<[ffi::MaterialMap;10]>
+}
+impl<'a> MaterialBuilder<'a> {
+    pub fn init(rl: &'a mut RaylibHandle, thread: &'a RaylibThread) -> Self {
+        Self { 
+            rl, thread, vert: None, frag: None, 
+            maps: unsafe { Box::new(std::mem::zeroed()) }
+        }
+    }
+    pub fn vert(mut self, path: &str) -> Self {
+        self.vert = Some(Box::from(path));
+        return self;
+    }
+    pub fn frag(mut self, path: &str) -> Self {
+        self.frag = Some(Box::from(path));
+        return self;
+    }
+    pub fn map(mut self, index: MaterialMapIndex, path: &str) -> Self {
+        let mut tex =
+            self.rl.load_texture(self.thread, path)
+            .expect(&format!("load texture {path}"));
+
+        tex.gen_texture_mipmaps();
+
+        self.maps[index as usize].texture = unsafe { tex.unwrap() };
+        return self;
+    }
+    pub fn build(self) -> Material {
+        let shader = self.rl.load_shader(
+                self.thread, self.vert.as_deref(), self.frag.as_deref()
+            );
+
+        let maps = Box::leak(self.maps);
+        
+        let raw_material = ffi::Material {
+                shader: shader.to_raw(),
+                maps: maps.as_mut_ptr(),
+                params: [ 0., 0., 0., 0. ]
+            };
+
+        assert!(unsafe { ffi::IsMaterialValid(raw_material) });
+        
+        return unsafe { Material::from_raw(raw_material) };
+    }
+}
+
+// draw mesh but with a Material instead of a WeakMaterial. actually, this
+// function lets you use either.
+pub fn draw_mesh2(
+    _: &RaylibMode3D<'_, impl Sized>,
+    mesh: impl AsRef<ffi::Mesh>,
+    material: impl AsRef<ffi::Material>,
+    transform: Matrix,
+) {
+    unsafe { ffi::DrawMesh(*mesh.as_ref(), *material.as_ref(), transform.into()) }
+}
+
 pub struct VecMesh {
     pub vao_id: u32,
     pub vbo_id: Vec<u32>,
@@ -14,6 +77,7 @@ pub struct VecMesh {
     pub indices: Vec<u16>,
 }
 
+#[allow(dead_code)]
 impl VecMesh {
     pub fn new() -> VecMesh {
         return VecMesh {
@@ -45,7 +109,7 @@ impl VecMesh {
         self.colors.extend_from_slice(&[c.r, c.g, c.b]);
     }
 
-    pub fn to_mesh(mut self: VecMesh) -> Mesh {
+    pub fn to_mesh(self: VecMesh) -> Mesh {
         let vertex_count = (self.vertices.len() / 3) as i32;
         let triangle_count =
             if self.indices.len() > 0 { self.indices.len() / 3 }
@@ -63,7 +127,7 @@ impl VecMesh {
 
         let raw_mesh = ffi::Mesh {
             vaoId: self.vao_id,
-            vboId: self.vbo_id.as_mut_ptr(),
+            vboId: vec_to_ptr(self.vbo_id),
 
             vertexCount: vertex_count,
             triangleCount: triangle_count,
