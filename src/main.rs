@@ -2,29 +2,32 @@ use std::collections::VecDeque;
 
 use raylib::prelude::*;
 
+mod game;
 mod player;
 mod render;
 mod world;
-mod game;
 
 use player::Player;
 use world::generation::World;
 
-use render::{mesh_tools, skybox};
+use MaterialMapIndex::*;
 use mesh_tools::{MaterialBuilder, draw_mesh2};
 use render::worldmesh::WorldRenderer;
-use MaterialMapIndex::*;
+use render::{mesh_tools, skybox};
 
 use std::time::Instant;
 
-use crate::{game::{GameData, Sounds}, render::pause_menu::PauseMenu};
+use crate::{
+    game::{GameData, Sounds},
+    render::pause_menu::PauseMenu,
+};
 
 const DBG_FONT_SIZE: i32 = 16;
 
 const WINDOW_WIDTH: i32 = 1280;
 const WINDOW_HEIGHT: i32 = 720;
 const TICKRATE: u32 = 40;
-const TICK_LENGTH: f32 = 1./(TICKRATE as f32);
+const TICK_LENGTH: f32 = 1. / (TICKRATE as f32);
 
 fn main() {
     // XXX: RaylibHandle may not be dropped before any of the raylib resources!!
@@ -34,12 +37,12 @@ fn main() {
         .size(WINDOW_WIDTH, WINDOW_HEIGHT)
         .title("Minecrab")
         .vsync()
-        .highdpi()   // disabled since switching to SDL
+        .highdpi() // disabled since switching to SDL
         .build();
 
     // Disable exit on esc (default raylib behavior)
     rl.set_exit_key(None);
-    
+
     let mut skybox_mesh: Mesh = skybox::create_skybox_mesh();
 
     let mut skybox_material = MaterialBuilder::init(&mut rl, &thread)
@@ -56,19 +59,17 @@ fn main() {
     // create a static reference to audio_stream and sounds.
     // not sure if there's a better way to do this.
     let audio_stream = Box::leak(Box::new(
-        RaylibAudio::init_audio_device().expect("init audio")
+        RaylibAudio::init_audio_device().expect("init audio"),
     ));
-    let sounds = Box::leak(Box::new(
-        Sounds {
-            menu_open: audio_stream
-                .new_sound(&"assets/audio/menu-open.ogg")
-                .expect(&"load sound"),
-            menu_close: audio_stream
-                .new_sound(&"assets/audio/menu-close.ogg")
-                .expect(&"load sound"),
-        }
-    ));
-    
+    let sounds = Box::leak(Box::new(Sounds {
+        menu_open: audio_stream
+            .new_sound(&"assets/audio/menu-open.ogg")
+            .expect(&"load sound"),
+        menu_close: audio_stream
+            .new_sound(&"assets/audio/menu-close.ogg")
+            .expect(&"load sound"),
+    }));
+
     // don't you dare create a "new"
     // or "init" method for this struct
     let mut gd = GameData {
@@ -85,14 +86,14 @@ fn main() {
         frame_counter: 0,
         last_tick_time: 0.,
         last_frame_total_time: 0.,
-        debug_frame_times: VecDeque::from([0.;300]),
+        debug_frame_times: VecDeque::from([0.; 300]),
     };
 
     let mut next_tick_in = 0_f32;
 
     while !gd.should_quit {
         let frame_start = Instant::now();
-        
+
         next_tick_in -= gd.last_frame_total_time;
 
         if next_tick_in < 0_f32 {
@@ -104,7 +105,7 @@ fn main() {
         }
 
         //on a scale of zero to one, how close are we to the next tick.
-        let interp = 1. - (next_tick_in/TICK_LENGTH).clamp(0., 1.);
+        let interp = 1. - (next_tick_in / TICK_LENGTH).clamp(0., 1.);
 
         // FIXME?
         // Because rl is part of gd and rl.draw takes a mutable reference to it,
@@ -135,33 +136,37 @@ fn main() {
 
         let day_amount: f32 = skybox::day_amount(gd.tick_counter);
         let skybox_loc = skybox_material.shader().get_shader_location("dayAmount");
-        let block_loc = world_renderer.material.shader().get_shader_location("dayAmount");
-        skybox_material.shader_mut().set_shader_value(skybox_loc, day_amount);
-        world_renderer.material.shader_mut().set_shader_value(block_loc, day_amount);
+        let block_loc = world_renderer
+            .material
+            .shader()
+            .get_shader_location("dayAmount");
+        skybox_material
+            .shader_mut()
+            .set_shader_value(skybox_loc, day_amount);
+        world_renderer
+            .material
+            .shader_mut()
+            .set_shader_value(block_loc, day_amount);
 
         d.draw_mode3D(skybox_cam, |d2, _camera| {
-            draw_mesh2(
-                &d2,
-                &mut skybox_mesh,
-                &skybox_material,
-                Matrix::identity(),
-            );
+            draw_mesh2(&d2, &mut skybox_mesh, &skybox_material, Matrix::identity());
         });
 
         // World
-        if !gd.paused { player.update_camera(interp); }
+        if !gd.paused {
+            player.update_camera(interp);
+        }
 
         world_renderer.render(&mut d, player.camera);
 
         // Crosshair
         draw_crosshair(&mut d);
-        
+
         // Debug Info
         if gd.debug_info_shown {
             d.draw_text(&gd.debug_text, 20, 20, DBG_FONT_SIZE, Color::BLACK);
             let text = if gd.debug_frame_times.len() >= 300 {
-                let mut sorted_ft = gd.debug_frame_times
-                    .iter().collect::<Vec<_>>();
+                let mut sorted_ft = gd.debug_frame_times.iter().collect::<Vec<_>>();
                 sorted_ft.sort_by(|a, b| f32::total_cmp(*b, *a));
                 let p100 = *sorted_ft[0] * 1000.;
                 let p99 = *sorted_ft[2] * 1000.;
@@ -185,16 +190,20 @@ fn main() {
         if gd.paused {
             gd.pause_menu.render(&mut d);
         }
-    
+
+        /* End drawing */
+        std::mem::drop(d);
+
         let frame_compute_time = frame_start.elapsed().as_secs_f32();
         gd.debug_frame_times.push_back(frame_compute_time);
-        while gd.debug_frame_times.len() > 300 { gd.debug_frame_times.pop_front(); }
-        
-        unsafe { 
-            raylib::ffi::EndDrawing();
+        while gd.debug_frame_times.len() > 300 {
+            gd.debug_frame_times.pop_front();
+        }
+
+        unsafe {
             raylib::ffi::SwapScreenBuffer();
         }
-    
+
         gd.frame_counter += 1;
         gd.last_frame_total_time = frame_start.elapsed().as_secs_f32();
     }

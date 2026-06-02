@@ -56,16 +56,10 @@ pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
 
     gd.should_quit |= rl.window_should_close();
 
-    if gd.paused {
-        if rl.is_key_pressed(KEY_ESCAPE) { gd.paused = false; }
-    } else {
+    if !gd.paused {
         let (world, player) = (&mut gd.world, &mut gd.player);
 
         player.process_tick(rl);
-
-        if rl.is_key_pressed(KEY_ESCAPE) {
-            gd.paused = true;
-        }
 
         if rl.is_key_pressed(KEY_BACKSLASH) {
             gd.debug_info_shown = !gd.debug_info_shown;
