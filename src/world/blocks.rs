@@ -70,6 +70,8 @@ const TEX_COORDS_WOOD: BlockTextureCoordinates = cylindrical_textured_block!(
 
 const TEX_COORDS_LEAVES: BlockTextureCoordinates = monotextured_block!(0.5, 0.1);
 
+const TEX_COORDS_BEDROCK: BlockTextureCoordinates = monotextured_block!(0.6, 0.0);
+
 impl BlockTextureCoordinates {
 
     pub fn new(block_type: BlockData) -> BlockTextureCoordinates {
@@ -80,6 +82,7 @@ impl BlockTextureCoordinates {
             BlockData::STONE => TEX_COORDS_STONE,
             BlockData::WOOD => TEX_COORDS_WOOD,
             BlockData::LEAVES => TEX_COORDS_LEAVES,
+            BlockData::BEDROCK => TEX_COORDS_BEDROCK,
             // Not implemented yet!
             _ => TEX_COORDS_ERROR,
         }
