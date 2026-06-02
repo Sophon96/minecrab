@@ -26,6 +26,8 @@ const DBG_FONT_SIZE: i32 = 16;
 
 const WINDOW_WIDTH: i32 = 1280;
 const WINDOW_HEIGHT: i32 = 720;
+const TICKRATE: u32 = 40;
+const TICK_LENGTH: f32 = 1. / (TICKRATE as f32);
 
 fn main() {
     // XXX: RaylibHandle may not be dropped before any of the raylib resources!!
@@ -83,22 +85,27 @@ fn main() {
         tick_counter: 0,
         frame_counter: 0,
         last_tick_time: 0.,
-        next_tick_in: 0.,
         last_frame_total_time: 0.,
         debug_frame_times: VecDeque::from([0.; 300]),
     };
 
+    let mut next_tick_in = 0_f32;
+
     while !gd.should_quit {
         let frame_start = Instant::now();
 
-        /* Frame-wise updates */
-        unsafe {
-            raylib::ffi::PollInputEvents();
-        }
-        game::update(&mut gd, &mut rl);
+        next_tick_in -= gd.last_frame_total_time;
 
-        /* Tick-wise updates */
-        game::tick(&mut gd, &mut rl);
+        if next_tick_in < 0_f32 {
+            let tick_start = Instant::now();
+            game::tick(&mut gd, &mut rl);
+            gd.tick_counter += 1;
+            gd.last_tick_time = tick_start.elapsed().as_secs_f32();
+            next_tick_in += TICK_LENGTH;
+        }
+
+        //on a scale of zero to one, how close are we to the next tick.
+        let interp = 1. - (next_tick_in / TICK_LENGTH).clamp(0., 1.);
 
         // FIXME?
         // Because rl is part of gd and rl.draw takes a mutable reference to it,
@@ -108,6 +115,11 @@ fn main() {
         // access to gd) into their own functions. Not sure how to fix. -m
         let player = &mut gd.player;
         let world_renderer = &mut gd.world_renderer;
+
+        // Update pause menu
+        gd.pause_menu.update(&mut rl);
+        gd.paused = !gd.pause_menu.is_running();
+        gd.should_quit |= gd.pause_menu.should_quit();
 
         /* Begin rendering */
         let mut d = rl.begin_drawing(&thread);
@@ -139,6 +151,11 @@ fn main() {
         d.draw_mode3D(skybox_cam, |d2, _camera| {
             draw_mesh2(&d2, &mut skybox_mesh, &skybox_material, Matrix::identity());
         });
+
+        // World
+        if !gd.paused {
+            player.update_camera(interp);
+        }
 
         world_renderer.render(&mut d, player.camera);
 
