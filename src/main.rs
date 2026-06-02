@@ -37,7 +37,7 @@ fn main() {
         .size(WINDOW_WIDTH, WINDOW_HEIGHT)
         .title("Minecrab")
         .vsync()
-        .highdpi() // disabled since switching to SDL
+        .highdpi()
         .build();
 
     // Disable exit on esc (default raylib behavior)
@@ -104,6 +104,8 @@ fn main() {
             next_tick_in += TICK_LENGTH;
         }
 
+        gd.world.poll_chunk_gen_thread(&mut gd.world_renderer);
+
         //on a scale of zero to one, how close are we to the next tick.
         let interp = 1. - (next_tick_in / TICK_LENGTH).clamp(0., 1.);
 
@@ -115,11 +117,6 @@ fn main() {
         // access to gd) into their own functions. Not sure how to fix. -m
         let player = &mut gd.player;
         let world_renderer = &mut gd.world_renderer;
-
-        // Update pause menu
-        gd.pause_menu.update(&mut rl);
-        gd.paused = !gd.pause_menu.is_running();
-        gd.should_quit |= gd.pause_menu.should_quit();
 
         /* Begin rendering */
         let mut d = rl.begin_drawing(&thread);

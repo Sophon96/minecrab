@@ -56,6 +56,11 @@ pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
 
     gd.should_quit |= rl.window_should_close();
 
+    // Update pause menu
+    gd.pause_menu.update(rl);
+    gd.paused = !gd.pause_menu.is_running();
+    gd.should_quit |= gd.pause_menu.should_quit();
+
     if !gd.paused {
         let (world, player) = (&mut gd.world, &mut gd.player);
 
@@ -93,14 +98,13 @@ pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
             }
         }
 
-        let Vector3 { x: px, y: py, z: pz } = player.camera.position;
-        world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, 1);
-        world.poll_chunk_gen_thread(&mut gd.world_renderer);
-
         if gd.debug_info_shown {
             gd.debug_text = debug_info_fmt(gd);
         }
     }
+
+    let Vector3 { x: px, y: py, z: pz } = gd.player.camera.position;
+    gd.world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, 1);
 }
 
 fn debug_info_fmt(gd: &mut GameData) -> String {
