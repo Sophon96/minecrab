@@ -256,7 +256,7 @@ impl World {
     }
 
     pub fn generate_surrounding_chunks(&mut self, px: i64, py: i64, pz: i64, radius: u32) {
-	let render_distance = radius as i64;
+        let render_distance = radius as i64;
 
         let (cx, cy, cz) = World::get_chunk_coords_of_block(px, py, pz);
 
