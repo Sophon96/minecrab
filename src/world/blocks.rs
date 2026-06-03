@@ -76,9 +76,7 @@ const TEX_COORDS_WOOD: BlockTextureCoordinates = cylindrical_textured_block!(
 );
 const TEX_COORDS_LEAVES: BlockTextureCoordinates = monotextured_block!(0.5, 0.1);
 
-<<<<<<< Updated upstream
 const TEX_COORDS_BEDROCK: BlockTextureCoordinates = monotextured_block!(0.6, 0.0);
-=======
 const TEX_COORDS_CRYSTAL: BlockTextureCoordinates = monotextured_block!(0.7, 0.0);
 const TEX_COORDS_SAND_STONE: BlockTextureCoordinates = monotextured_block!(0.0, 0.1);
 const TEX_COORDS_SAND: BlockTextureCoordinates = monotextured_block!(0.1, 0.1);
@@ -89,7 +87,6 @@ const TEX_COORDS_ZERGONITE: BlockTextureCoordinates = monotextured_block!(0.6, 0
 const TEX_COORDS_OPTINITE: BlockTextureCoordinates = monotextured_block!(0.7, 0.2);
 const TEX_COORDS_SNOW: BlockTextureCoordinates = monotextured_block!(0.6, 0.3);
 const TEX_COORDS_ORANGE: BlockTextureCoordinates = monotextured_block!(0.7, 0.3);
->>>>>>> Stashed changes
 
 impl BlockTextureCoordinates {
 
@@ -101,9 +98,7 @@ impl BlockTextureCoordinates {
             BlockData::STONE => TEX_COORDS_STONE,
             BlockData::WOOD => TEX_COORDS_WOOD,
             BlockData::LEAVES => TEX_COORDS_LEAVES,
-<<<<<<< Updated upstream
             BlockData::BEDROCK => TEX_COORDS_BEDROCK,
-=======
 
             BlockData::CRYSTAL => TEX_COORDS_CRYSTAL,
             BlockData::SAND_STONE => TEX_COORDS_SAND_STONE,
@@ -115,7 +110,6 @@ impl BlockTextureCoordinates {
             BlockData::OPTINITE => TEX_COORDS_OPTINITE,
             BlockData::SNOW => TEX_COORDS_SNOW,
             BlockData::ORANGE => TEX_COORDS_ORANGE,
->>>>>>> Stashed changes
             // Not implemented yet!
             _ => TEX_COORDS_ERROR,
         }
