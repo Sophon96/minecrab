@@ -65,7 +65,7 @@ impl Player {
             speed: DEFAULT_SPEED,
             momentum: Vector3{x: 0.0, y: 0.0, z: 0.0},
             view_azim,
-            view_elev
+            view_elev,
         };
     }
 
@@ -84,10 +84,10 @@ impl Player {
     }
 
     fn handle_input(&mut self, rl: &mut RaylibHandle) {
-        let mouse_delta = rl.get_mouse_delta();
+        let Vector2 { x: dx, y: dy } = rl.get_mouse_delta();
 
-        self.view_azim += mouse_delta.x * MOUSE_SENS;
-        self.view_elev -= mouse_delta.y * MOUSE_SENS;
+        self.view_azim += dx * MOUSE_SENS;
+        self.view_elev -= dy * MOUSE_SENS;
 
         // Avoid vertical singularities
         self.view_elev = self.view_elev.clamp(-1.57, 1.57);

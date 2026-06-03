@@ -2,6 +2,7 @@ use raylib::prelude::*;
 use std::collections::VecDeque;
 
 use crate::player::Player;
+use crate::render::pause_menu::PauseMenu;
 use crate::world::generation::World;
 use crate::world::blocks::BlockData;
 use crate::render::worldmesh::WorldRenderer;
@@ -21,6 +22,8 @@ pub struct GameData {
     pub paused: bool,
     pub should_quit: bool,
 
+    pub pause_menu: PauseMenu,
+    
     pub player: Player,
     pub world: World,
 
@@ -53,16 +56,15 @@ pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
 
     gd.should_quit |= rl.window_should_close();
 
-    if gd.paused {
-        if rl.is_key_pressed(KEY_ESCAPE) { gd.paused = false; }
-    } else {
+    // Update pause menu
+    gd.pause_menu.update(rl);
+    gd.paused = !gd.pause_menu.is_running();
+    gd.should_quit |= gd.pause_menu.should_quit();
+
+    if !gd.paused {
         let (world, player) = (&mut gd.world, &mut gd.player);
 
         player.process_tick(rl);
-
-        if rl.is_key_pressed(KEY_ESCAPE) {
-            gd.paused = true;
-        }
 
         if rl.is_key_pressed(KEY_BACKSLASH) {
             gd.debug_info_shown = !gd.debug_info_shown;
@@ -96,14 +98,13 @@ pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
             }
         }
 
-        let Vector3 { x: px, y: py, z: pz } = player.camera.position;
-        world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, 1);
-        world.poll_chunk_gen_thread(&mut gd.world_renderer);
-
         if gd.debug_info_shown {
             gd.debug_text = debug_info_fmt(gd);
         }
     }
+
+    let Vector3 { x: px, y: py, z: pz } = gd.player.camera.position;
+    gd.world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, 1);
 }
 
 fn debug_info_fmt(gd: &mut GameData) -> String {
