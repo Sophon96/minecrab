@@ -1,4 +1,5 @@
 use raylib::prelude::*;
+use serde::{Deserialize, Serialize};
 
 mod keys {
     use raylib::prelude::{KeyboardKey, KeyboardKey::*};
@@ -25,82 +26,62 @@ fn movement_smooth(from: f32, to: f32) -> f32 {
     from + (to - from) * FRICTION
 }
 
+// TODO: this should probably be named camera
 pub struct Player {
-    pub prev_pos: Vector3,
-    pub next_pos: Vector3,
-    pub prev_fwd: Vector3,
-    pub next_fwd: Vector3,
-
     pub camera: Camera3D,
-    pub speed: f32,
-    pub momentum: Vector3,
-    pub view_azim: f32,
-    pub view_elev: f32,
 }
 
 impl Player {
-    pub fn new() -> Player {
-        let pos = Vector3::new(3.0, 80., 3.0);
-        let view_azim: f32 = -2.3;
-        let view_elev: f32 = -0.8;
+    pub fn new(pd: &PlayerData) -> Player {
+        let camera =
+            Camera3D::perspective(pd.pos, pd.fwd, Vector3::new(0.0, 1.0, 0.0), 45.0);
 
-        let target = pos + Vector3 {
-                x: view_azim.cos() * view_elev.cos(),
-                y: view_elev.sin(),
-                z: view_azim.sin() * view_elev.cos()
-            };
-
-        let camera = Camera3D::perspective(
-                pos, target,
-                Vector3::new(0.0, 1.0, 0.0),
-                45.0,
-            );
-
-        return Player {
-            prev_pos: pos,
-            next_pos: pos,
-            prev_fwd: target,
-            next_fwd: target,
-            camera,
-            speed: DEFAULT_SPEED,
-            momentum: Vector3{x: 0.0, y: 0.0, z: 0.0},
-            view_azim,
-            view_elev
-        };
+        Player { camera }
     }
 
-    pub fn update_camera(&mut self, interp: f32) {
-        self.camera.position =
-            self.prev_pos + (self.next_pos - self.prev_pos) * interp;
-        
-        self.camera.target =
-            self.camera.position
-            + self.prev_fwd + (self.next_fwd - self.prev_fwd) * interp;
+    pub fn update_camera(&mut self, pd: &mut PlayerData, interp: f32) {
+        pd.pos = pd.prev_pos + (pd.next_pos - pd.prev_pos) * interp;
+        self.camera.position = pd.pos;
+
+        pd.fwd =
+            self.camera.position + pd.prev_fwd + (pd.next_fwd - pd.prev_fwd) * interp;
+        self.camera.target = pd.fwd;
     }
 
-    pub fn process_tick(&mut self, rl: &mut RaylibHandle) {
-        (self.prev_pos, self.prev_fwd) = (self.next_pos, self.next_fwd);
-        self.handle_input(rl);
+    pub fn process_tick(&mut self, pd: &mut PlayerData, rl: &mut RaylibHandle) {
+        (pd.prev_pos, pd.prev_fwd) = (pd.next_pos, pd.next_fwd);
+        self.handle_input(pd, rl);
     }
 
-    fn handle_input(&mut self, rl: &mut RaylibHandle) {
+    fn handle_input(&mut self, pd: &mut PlayerData, rl: &mut RaylibHandle) {
         let mouse_delta = rl.get_mouse_delta();
 
-        self.view_azim += mouse_delta.x * MOUSE_SENS;
-        self.view_elev -= mouse_delta.y * MOUSE_SENS;
+        pd.view_azim += mouse_delta.x * MOUSE_SENS;
+        pd.view_elev -= mouse_delta.y * MOUSE_SENS;
 
         // Avoid vertical singularities
-        self.view_elev = self.view_elev.clamp(-1.57, 1.57);
+        pd.view_elev = pd.view_elev.clamp(-1.57, 1.57);
 
-        if rl.is_key_pressed(keys::SPEED_INC) { self.speed *= 2.0; }
-        else if rl.is_key_pressed(keys::SPEED_DEC) { self.speed /= 2.0; }
+        if rl.is_key_pressed(keys::SPEED_INC) {
+            pd.speed *= 2.0;
+        } else if rl.is_key_pressed(keys::SPEED_DEC) {
+            pd.speed /= 2.0;
+        }
 
-        let (azim_cos, azim_sin) = (self.view_azim.cos(), self.view_azim.sin());
+        let (azim_cos, azim_sin) = (pd.view_azim.cos(), pd.view_azim.sin());
 
-        let flat_forward = Vector3 { x: azim_cos, y: 0.0, z: azim_sin };
-        let right = Vector3 { x: -azim_sin, y: 0.0, z: azim_cos };
-        
-        let (elev_cos, elev_sin) = (self.view_elev.cos(), self.view_elev.sin());
+        let flat_forward = Vector3 {
+            x: azim_cos,
+            y: 0.0,
+            z: azim_sin,
+        };
+        let right = Vector3 {
+            x: -azim_sin,
+            y: 0.0,
+            z: azim_cos,
+        };
+
+        let (elev_cos, elev_sin) = (pd.view_elev.cos(), pd.view_elev.sin());
 
         let forward = Vector3 {
             x: azim_cos * elev_cos,
@@ -119,19 +100,64 @@ impl Player {
         } else {
             (ipx, ipy)
         };
-        
-        let raw_momentum = 
-            right * ipx
-            + Vector3::new(0.0, 1.0, 0.0) * ipy
-            + flat_forward * ipz;
 
-        self.momentum = Vector3 {
-            x: movement_smooth(self.momentum.x, raw_momentum.x),
-            y: movement_smooth(self.momentum.y, raw_momentum.y),
-            z: movement_smooth(self.momentum.z, raw_momentum.z),
+        let raw_momentum = right * ipx + Vector3::new(0.0, 1.0, 0.0) * ipy + flat_forward * ipz;
+
+        pd.momentum = Vector3 {
+            x: movement_smooth(pd.momentum.x, raw_momentum.x),
+            y: movement_smooth(pd.momentum.y, raw_momentum.y),
+            z: movement_smooth(pd.momentum.z, raw_momentum.z),
         };
-        
-        self.next_pos += self.momentum * self.speed;
-        self.next_fwd = forward;
+
+        pd.next_pos += pd.momentum * pd.speed;
+        pd.next_fwd = forward;
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PlayerData {
+    pub pos: Vector3,
+    pub fwd: Vector3,
+    
+    pub prev_pos: Vector3,
+    pub next_pos: Vector3,
+    pub prev_fwd: Vector3,
+    pub next_fwd: Vector3,
+
+    pub speed: f32,
+    pub momentum: Vector3,
+    pub view_azim: f32,
+    pub view_elev: f32,
+}
+
+impl PlayerData {
+    pub fn new() -> Self {
+        let pos = Vector3::new(3.0, 80., 3.0);
+        let view_azim: f32 = -2.3;
+        let view_elev: f32 = -0.8;
+
+        let target = pos
+            + Vector3 {
+                x: view_azim.cos() * view_elev.cos(),
+                y: view_elev.sin(),
+                z: view_azim.sin() * view_elev.cos(),
+            };
+
+        PlayerData {
+            pos,
+            fwd: target,
+            prev_pos: pos,
+            next_pos: pos,
+            prev_fwd: target,
+            next_fwd: target,
+            speed: DEFAULT_SPEED,
+            momentum: Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            view_azim,
+            view_elev,
+        }
     }
 }

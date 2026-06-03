@@ -13,6 +13,151 @@ use crate::world::blocks::BlockData;
 
 pub const CHUNK_SIZE: i64 = 32;
 
+pub struct ChunkGenThread {
+    input_tx: Sender<(i64, i64, i64, Option<Chunk>)>,
+    result_rx: Receiver<(i64, i64, i64, Option<Chunk>, VecMesh)>,
+    chunk_gen_thread: JoinHandle<()>,
+
+    chunks_in_progress: HashSet<(i64, i64, i64)>,
+}
+
+impl ChunkGenThread {
+    pub fn new(seed: u32) -> Self {
+        let (input_tx, input_rx) = mpsc::channel::<(i64, i64, i64, Option<Chunk>)>();
+        let (result_tx, result_rx) = mpsc::channel::<(i64, i64, i64, Option<Chunk>, VecMesh)>();
+        let chunk_gen_thread = thread::spawn(move || {
+            ChunkGenThread::remote_generate_terrain_chunk(seed, input_rx, result_tx);
+        });
+
+        Self {
+            input_tx,
+            result_rx,
+            chunk_gen_thread,
+            chunks_in_progress: HashSet::new(),
+        }
+    }
+
+    /// Dispatches a new chunk gen request
+    pub fn dispatch_chunk_gen(&mut self, cx: i64, cy: i64, cz: i64) {
+        if self.chunks_in_progress.contains(&(cx, cy, cz)) {
+            return;
+        }
+
+        self.input_tx.send((cx, cy, cz, None)).unwrap();
+        self.chunks_in_progress.insert((cx, cy, cz));
+    }
+
+    /// Dispatches request to only update mesh without generating chunk
+    pub fn dispatch_mesh_chunk(&self, chunk: &Chunk, cx: i64, cy: i64, cz: i64) {
+        // FIXME: unnecessary? move notice to top and delete
+        if self.chunks_in_progress.contains(&(cx, cy, cz)) {
+            return;
+        }
+
+        // FIXME: the clone here is almost certainly not the best idea, but it
+        // functions as a poor (rich?) man's mutex and also prevents us from
+        // having to contend with lifetimes
+        self.input_tx.send((cx, cy, cz, Some(chunk.clone()))).unwrap();
+
+        // XXX: We want to **allow** the same chunk to be sent for remeshing
+        // multiple times, since the mpsc acts as a queue letting the thread
+        // know that the chunk has changed. Otherwise, the mesh can lag behind
+        // the current state of the chunk of the mesh update is too slow.
+        // self.chunks_in_progress.insert((cx, cy, cz));
+    }
+
+    /// Polls the chunk gen thread for new blocks
+    pub fn poll(&mut self) -> Option<(i64, i64, i64, Option<Chunk>, VecMesh)> {
+        let result = self.result_rx.try_recv();
+        match result {
+            Ok(result) => {
+                self.chunks_in_progress
+                    .remove(&(result.0, result.1, result.2));
+                Some(result)
+            }
+            Err(_) => {
+                // we don't really care if it's disconnected or empty
+                // although it would probably be good to log it
+                // maybe in the future then
+                None
+            }
+        }
+    }
+
+    /// Join this chunk generation thread
+    pub fn join(self) -> Result<(), Box<dyn std::any::Any + Send + 'static>> {
+        // Drop input_tx to hang up and signal thread to terminate
+        std::mem::drop(self.input_tx);
+        self.chunk_gen_thread.join()
+    }
+
+    fn remote_generate_terrain_chunk(
+        seed: u32,
+        input_rx: Receiver<(i64, i64, i64, Option<Chunk>)>,
+        result_tx: Sender<(i64, i64, i64, Option<Chunk>, VecMesh)>,
+    ) {
+        eprintln!("Terrain generation chunk started");
+        loop {
+            let Ok((cx, cy, cz, existing_chunk)) = input_rx.recv() else {
+                eprintln!("chunk gen thread: input channel hung up, goodbye.");
+                return;
+            };
+
+            if let Some(chunk) = existing_chunk {
+                // Chunk was provided, only build the mesh
+                let vmesh = worldmesh::remote_build_geometry_chunk(&chunk, cx, cy, cz);
+                result_tx.send((cx, cy, cz, None, vmesh)).unwrap();
+            } else {
+                // If no chunk was provided, then we need to generate one
+                let mut chunk = Chunk::new(cx, cy, cz);
+
+                let r = 0..CHUNK_SIZE;
+
+                for z in r.clone() {
+                    for x in r.clone() {
+                        let (wx, wz) = (x + CHUNK_SIZE * cx, z + CHUNK_SIZE * cz);
+                        ChunkGenThread::remote_generate_terrain_column(seed, &mut chunk, wx, wz, cy);
+                    }
+                }
+
+                let vmesh = worldmesh::remote_build_geometry_chunk(&chunk, cx, cy, cz);
+                result_tx.send((cx, cy, cz, Some(chunk), vmesh)).unwrap();
+            }
+
+            eprintln!("done with {cx}, {cy}, {cz}");
+        }
+    }
+
+    fn remote_generate_terrain_column(seed: u32, chunk: &mut Chunk, x: i64, z: i64, cy: i64) {
+        // Generates one column within a chunk
+        let ssn = SuperSimplex::new(seed);
+
+        // How shallow slopes are. Don't set below 16 or it will error.
+        let noise_scale = 80.;
+
+        let sample_point = [(x as f64 / noise_scale), (z as f64 / noise_scale)];
+
+        // arbitrary constants, give a height map between 4*12 and 6*12
+        let height = ((ssn.get(sample_point) + 5_f64) * 12_f64) as i64;
+
+        for y in (CHUNK_SIZE * cy)..(CHUNK_SIZE * (cy + 1)) {
+            let block_data = if y > height {
+                BlockData::AIR
+            } else if y == height {
+                BlockData::GRASS
+            } else if y > height - 3 {
+                BlockData::DIRT
+            } else if y > 4 {
+                BlockData::STONE
+            } else {
+                BlockData::BEDROCK
+            };
+
+            chunk.set_block_data(x, y, z, block_data);
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Chunk {
     /* absolute chunk coordinates
@@ -32,49 +177,8 @@ pub struct Chunk {
     voxels: Box<[BlockData]>,
 }
 
-pub struct ChunkGenThread {
-    input_tx: Sender<(i64, i64, i64, Option<Chunk>)>,
-    result_rx: Receiver<(i64, i64, i64, Option<Chunk>, VecMesh)>,
-
-    // XXX: We will probably never need to join this
-    #[expect(dead_code)]
-    chunk_gen_thread: JoinHandle<()>,
-}
-
-impl ChunkGenThread {
-    pub fn new() -> Self {
-        let (input_tx, input_rx) = mpsc::channel::<(i64, i64, i64, Option<Chunk>)>();
-        let (result_tx, result_rx) = mpsc::channel::<(i64, i64, i64, Option<Chunk>, VecMesh)>();
-        let chunk_gen_thread = thread::spawn(|| {
-            World::remote_generate_terrain_chunk(input_rx, result_tx);
-        });
-
-        Self {
-            input_tx,
-            result_rx,
-            chunk_gen_thread,
-        }
-    }
-
-    pub fn send(
-        &self,
-        t: (i64, i64, i64, Option<Chunk>),
-    ) -> Result<(), mpsc::SendError<(i64, i64, i64, Option<Chunk>)>> {
-        self.input_tx.send(t)
-    }
-
-    pub fn try_recv(&self) -> Result<(i64, i64, i64, Option<Chunk>, VecMesh), mpsc::TryRecvError> {
-        self.result_rx.try_recv()
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct World {
-    #[serde(skip, default = "ChunkGenThread::new")]
-    cgt: ChunkGenThread,
-
-    chunks_in_progress: HashSet<(i64, i64, i64)>,
-
     pub chunks: HashMap<(i64, i64, i64), Chunk>,
 }
 
@@ -125,9 +229,7 @@ impl Chunk {
 impl World {
     pub fn new() -> Self {
         Self {
-            cgt: ChunkGenThread::new(),
             chunks: HashMap::new(),
-            chunks_in_progress: HashSet::new(),
         }
     }
 
@@ -159,160 +261,6 @@ impl World {
             chunk.set_block_data(x, y, z, value)
         } else {
             panic!("set block data in a chunk that doesn't exist");
-        }
-    }
-
-    // Multi-threaded chunk gen stuff
-    // Technically not even "multi"-threaded (?)
-    // So just threaded, I guess...
-    /// Dispatches a new chunk gen request
-    pub fn dispatch_chunk_gen(&mut self, cx: i64, cy: i64, cz: i64) {
-        if self.chunks_in_progress.contains(&(cx, cy, cz)) {
-            return;
-        }
-
-        self.cgt.send((cx, cy, cz, None)).unwrap();
-        self.chunks_in_progress.insert((cx, cy, cz));
-    }
-
-    /// Dispatches request to only update mesh without generating chunk
-    pub fn dispatch_mesh_chunk(&self, cx: i64, cy: i64, cz: i64) {
-        if self.chunks_in_progress.contains(&(cx, cy, cz)) {
-            return;
-        }
-
-        let v = self
-            .chunks
-            .get(&(cx, cy, cz))
-            .expect("world did not contain requested chunk");
-
-        // FIXME: the clone here is almost certainly not the best idea, but it
-        // functions as a poor (rich?) man's mutex and also prevents us from
-        // having to contend with lifetimes
-        self.cgt.send((cx, cy, cz, Some(v.clone()))).unwrap();
-
-        // XXX: We want to **allow** the same chunk to be sent for remeshing
-        // multiple times, since the mpsc acts as a queue letting the thread
-        // know that the chunk has changed. Otherwise, the mesh can lag behind
-        // the current state of the chunk of the mesh update is too slow.
-        // self.chunks_in_progress.insert((cx, cy, cz));
-    }
-
-    /// Polls the chunk gen thread for new blocks
-    pub fn poll_chunk_gen_thread(&mut self, world_renderer: &mut worldmesh::WorldRenderer) {
-        let result = self.cgt.try_recv();
-        match result {
-            Ok(result) => {
-                if let Some(chunk) = result.3 {
-                    self.chunks.insert((result.0, result.1, result.2), chunk);
-                }
-
-                let mut mesh = result.4.to_mesh();
-                unsafe { mesh.upload(false) };
-                world_renderer.add_mesh(result.0, result.1, result.2, mesh);
-
-                self.chunks_in_progress
-                    .remove(&(result.0, result.1, result.2));
-            }
-            Err(_) => {
-                // we don't really care if it's disconnected or empty
-                // although it would probably be good to log it
-                // maybe in the future then
-            }
-        };
-    }
-
-    fn remote_generate_terrain_chunk(
-        input_rx: Receiver<(i64, i64, i64, Option<Chunk>)>,
-        result_tx: Sender<(i64, i64, i64, Option<Chunk>, VecMesh)>,
-    ) {
-        eprintln!("Terrain generation chunk started");
-        loop {
-            let Ok((cx, cy, cz, existing_chunk)) = input_rx.recv() else {
-                eprintln!("chunk gen thread: input channel hung up, goodbye.");
-                return;
-            };
-
-            if let Some(chunk) = existing_chunk {
-                // Chunk was provided, only build the mesh
-                let vmesh = worldmesh::remote_build_geometry_chunk(&chunk, cx, cy, cz);
-                result_tx.send((cx, cy, cz, None, vmesh)).unwrap();
-            } else {
-                // If no chunk was provided, then we need to generate one
-                let mut chunk = Chunk::new(cx, cy, cz);
-
-                let r = 0..CHUNK_SIZE;
-
-                for z in r.clone() {
-                    for x in r.clone() {
-                        let (wx, wz) = (x + CHUNK_SIZE * cx, z + CHUNK_SIZE * cz);
-                        World::remote_generate_terrain_column(&mut chunk, wx, wz, cy);
-                    }
-                }
-
-                let vmesh = worldmesh::remote_build_geometry_chunk(&chunk, cx, cy, cz);
-                result_tx.send((cx, cy, cz, Some(chunk), vmesh)).unwrap();
-            }
-
-            eprintln!("done with {cx}, {cy}, {cz}");
-        }
-    }
-
-    fn remote_generate_terrain_column(chunk: &mut Chunk, x: i64, z: i64, cy: i64) {
-        // Generates one column within a chunk
-        static SSN: std::sync::LazyLock<SuperSimplex> =
-            std::sync::LazyLock::new(|| SuperSimplex::new(42));
-
-        // How shallow slopes are. Don't set below 16 or it will error.
-        let noise_scale = 80.;
-
-        let sample_point = [(x as f64 / noise_scale), (z as f64 / noise_scale)];
-
-        // arbitrary constants, give a height map between 4*12 and 6*12
-        let height = ((SSN.get(sample_point) + 5_f64) * 12_f64) as i64;
-
-        for y in (CHUNK_SIZE * cy)..(CHUNK_SIZE * (cy + 1)) {
-            let block_data = if y > height {
-                BlockData::AIR
-            } else if y == height {
-                BlockData::GRASS
-            } else if y > height - 3 {
-                BlockData::DIRT
-            } else if y > 4 {
-                BlockData::STONE
-            } else {
-                BlockData::BEDROCK
-            };
-
-            chunk.set_block_data(x, y, z, block_data);
-        }
-    }
-
-    pub fn generate_surrounding_chunks(&mut self, px: i64, py: i64, pz: i64, radius: i64) {
-        let (cx, cy, cz) = World::get_chunk_coords_of_block(px, py, pz);
-
-        // Iterate from -radius to radius from lowest magnitude
-        // Probably not the most efficient way to to do this
-        let mut delta = (-radius..=radius).collect::<Vec<i64>>();
-        delta.sort_by_key(|i| i.abs());
-
-        for dx in &delta {
-            for dy in &delta {
-                for dz in &delta {
-                    let (cx, cy, cz) = (cx + dx, cy + dy, cz + dz);
-
-                    if !self.chunks.contains_key(&(cx, cy, cz)) {
-                        self.dispatch_chunk_gen(cx, cy, cz);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn mesh_all_chunks(&mut self, world_renderer: &mut worldmesh::WorldRenderer) {
-        world_renderer.clear_meshes();
-        for (k, v) in &self.chunks {
-            self.dispatch_mesh_chunk(k.0, k.1, k.2);
         }
     }
 }

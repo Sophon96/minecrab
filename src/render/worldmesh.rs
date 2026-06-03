@@ -1,7 +1,7 @@
 use raylib::prelude::*;
 use std::collections::HashMap;
 
-use crate::mesh_tools::{VecMesh, draw_mesh2};
+use crate::render::mesh_tools::{VecMesh, draw_mesh2};
 use crate::world::blocks::{BlockData, BlockTextureCoordinates};
 use crate::world::generation::{CHUNK_SIZE, Chunk};
 
