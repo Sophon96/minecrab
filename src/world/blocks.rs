@@ -8,6 +8,16 @@ pub enum BlockData {
     WOOD,
     LEAVES,
     BEDROCK,
+    CRYSTAL,
+    SAND_STONE,
+    SAND,
+    MUD,
+    DOLERITE,
+    ANZITE,
+    ZERGONITE,
+    OPTINITE,
+    SNOW,
+    ORANGE,
 }
 
 // Each type of block has six faces which can be rendered. Each face (until we
@@ -59,16 +69,24 @@ const TEX_COORDS_AIR: BlockTextureCoordinates = monotextured_block!(0.9, 0.0);
 const TEX_COORDS_GRASS: BlockTextureCoordinates = cylindrical_textured_block!(
     (0.0, 0.0), (0.2, 0.0), (0.1, 0.0)
 );
-
 const TEX_COORDS_DIRT: BlockTextureCoordinates = monotextured_block!(0.2, 0.0);
-
 const TEX_COORDS_STONE: BlockTextureCoordinates = monotextured_block!(0.3, 0.0);
-
 const TEX_COORDS_WOOD: BlockTextureCoordinates = cylindrical_textured_block!(
     (0.4, 0.1), (0.4, 0.1), (0.3, 0.1)
 );
-
 const TEX_COORDS_LEAVES: BlockTextureCoordinates = monotextured_block!(0.5, 0.1);
+
+const TEX_COORDS_BEDROCK: BlockTextureCoordinates = monotextured_block!(0.6, 0.0);
+const TEX_COORDS_CRYSTAL: BlockTextureCoordinates = monotextured_block!(0.7, 0.0);
+const TEX_COORDS_SAND_STONE: BlockTextureCoordinates = monotextured_block!(0.0, 0.1);
+const TEX_COORDS_SAND: BlockTextureCoordinates = monotextured_block!(0.1, 0.1);
+const TEX_COORDS_MUD: BlockTextureCoordinates = monotextured_block!(0.2, 0.1);
+const TEX_COORDS_DOLERITE: BlockTextureCoordinates = monotextured_block!(0.6, 0.1);
+const TEX_COORDS_ANZITE: BlockTextureCoordinates = monotextured_block!(0.7, 0.1);
+const TEX_COORDS_ZERGONITE: BlockTextureCoordinates = monotextured_block!(0.6, 0.2);
+const TEX_COORDS_OPTINITE: BlockTextureCoordinates = monotextured_block!(0.7, 0.2);
+const TEX_COORDS_SNOW: BlockTextureCoordinates = monotextured_block!(0.6, 0.3);
+const TEX_COORDS_ORANGE: BlockTextureCoordinates = monotextured_block!(0.7, 0.3);
 
 impl BlockTextureCoordinates {
 
@@ -80,6 +98,18 @@ impl BlockTextureCoordinates {
             BlockData::STONE => TEX_COORDS_STONE,
             BlockData::WOOD => TEX_COORDS_WOOD,
             BlockData::LEAVES => TEX_COORDS_LEAVES,
+            BlockData::BEDROCK => TEX_COORDS_BEDROCK,
+
+            BlockData::CRYSTAL => TEX_COORDS_CRYSTAL,
+            BlockData::SAND_STONE => TEX_COORDS_SAND_STONE,
+            BlockData::SAND => TEX_COORDS_SAND,
+            BlockData::MUD => TEX_COORDS_MUD,
+            BlockData::DOLERITE => TEX_COORDS_DOLERITE,
+            BlockData::ANZITE => TEX_COORDS_ANZITE,
+            BlockData::ZERGONITE => TEX_COORDS_ZERGONITE,
+            BlockData::OPTINITE => TEX_COORDS_OPTINITE,
+            BlockData::SNOW => TEX_COORDS_SNOW,
+            BlockData::ORANGE => TEX_COORDS_ORANGE,
             // Not implemented yet!
             _ => TEX_COORDS_ERROR,
         }
