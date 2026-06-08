@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 
 use raylib::prelude::*;
 
-mod game;
 mod player;
 mod render;
 mod world;
