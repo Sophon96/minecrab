@@ -10,40 +10,78 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    runs-on: macos-latest
+  build-linux:
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
-      
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
+      - uses: actions/checkout@v6
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Dependencies
-        run: brew install glfw
-      
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libclang-dev libsdl2-dev
+
       - name: Build
-        run: source ./scripts/macos-setup.sh && cargo build --verbose
-    
-  test:
+        run: cargo build --verbose
+
+  test-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libclang-dev libsdl2-dev
+
+      - name: Test
+        run: cargo test --verbose
+
+  build-macos:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v2
-      
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
+      - uses: actions/checkout@v6
 
-      - uses: Swatinem/rust-cache@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Dependencies
-        run: brew install glfw
-      
+        run: brew install sdl3
+
+      - name: Build
+        run: LIBRARY_PATH="$(brew --prefix)/lib" cargo build --verbose
+
+  test-macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Dependencies
+        run: brew install sdl3
+
       - name: Test
-        run: source ./scripts/macos-setup.sh && cargo test --verbose
+        run: LIBRARY_PATH="$(brew --prefix)/lib" cargo test --verbose
