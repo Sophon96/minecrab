@@ -7,6 +7,7 @@ use crate::world::generation::World;
 use crate::world::blocks::BlockData;
 use crate::render::worldmesh::WorldRenderer;
 use crate::world::collision::{VoxelRaycastHit, voxel_raycast};
+use crate::settings::Settings;
 
 use KeyboardKey::*;
 use MouseButton::*;
@@ -48,7 +49,9 @@ pub struct GameData {
     // not sure if we'll need it later or not.
     //
     // pub audio_stream: &'static RaylibAudio,
-    pub sounds: &'static Sounds<'static>
+    pub sounds: &'static Sounds<'static>,
+
+    pub settings: Settings
 }
 
 pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
@@ -97,6 +100,10 @@ pub fn tick(gd: &mut GameData, rl: &mut RaylibHandle) {
                 update_mesh_on_hit(world, h);
             }
         }
+
+        let Vector3 { x: px, y: py, z: pz } = player.camera.position;
+        world.generate_surrounding_chunks(px as i64, py as i64, pz as i64, gd.settings.render_distance);
+        world.poll_chunk_gen_thread(&mut gd.world_renderer);
 
         if gd.debug_info_shown {
             gd.debug_text = debug_info_fmt(gd);

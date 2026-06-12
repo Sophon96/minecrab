@@ -255,12 +255,14 @@ impl World {
         }
     }
 
-    pub fn generate_surrounding_chunks(&mut self, px: i64, py: i64, pz: i64, radius: i64) {
+    pub fn generate_surrounding_chunks(&mut self, px: i64, py: i64, pz: i64, radius: u32) {
+        let render_distance = radius as i64;
+
         let (cx, cy, cz) = World::get_chunk_coords_of_block(px, py, pz);
 
-        // Iterate from -radius to radius from lowest magnitude
+        // Iterate from -render_distance to render_distance from lowest magnitude
         // Probably not the most efficient way to to do this
-        let mut delta = (-radius..=radius).collect::<Vec<i64>>();
+        let mut delta = (-render_distance..=render_distance).collect::<Vec<i64>>();
         delta.sort_by_key(|i| i.abs());
 
         for dx in &delta {

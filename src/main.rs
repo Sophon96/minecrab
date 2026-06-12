@@ -2,10 +2,11 @@ use std::collections::VecDeque;
 
 use raylib::prelude::*;
 
-mod game;
 mod player;
 mod render;
 mod world;
+mod game;
+mod settings;
 
 use player::Player;
 use world::generation::World;
@@ -13,6 +14,8 @@ use world::generation::World;
 use MaterialMapIndex::*;
 use mesh_tools::{MaterialBuilder, draw_mesh2};
 use render::worldmesh::WorldRenderer;
+use MaterialMapIndex::*;
+use settings::Settings;
 use render::{mesh_tools, skybox};
 
 use std::time::Instant;
@@ -70,10 +73,15 @@ fn main() {
             .expect(&"load sound"),
     }));
 
+    let settings = Settings {
+        render_distance: 2
+    };
+
     // don't you dare create a "new"
     // or "init" method for this struct
     let mut gd = GameData {
         sounds,
+        settings,
         pause_menu: PauseMenu::new(),
         player: Player::new(),
         world: World::new(),
