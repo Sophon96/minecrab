@@ -7,10 +7,12 @@ use std::time::Instant;
 use crate::player::{Player, PlayerData};
 use crate::render::mesh_tools::{MaterialBuilder, draw_mesh2};
 use crate::render::skybox;
+use crate::render::pause_menu::PauseMenu;
 use crate::render::worldmesh::WorldRenderer;
 use crate::world::blocks::BlockData;
 use crate::world::collision::{VoxelRaycastHit, voxel_raycast};
 use crate::world::generation::{ChunkGenThread, World};
+use crate::settings::Settings;
 
 use KeyboardKey::*;
 use MouseButton::*;
@@ -45,6 +47,8 @@ pub struct GameController {
     pub paused: bool,
     pub should_quit: bool,
 
+    pub pause_menu: PauseMenu,
+    
     pub player: Player,
 
     // will be removed
@@ -115,6 +119,7 @@ impl GameController {
             game_data: gd,
             paused: true,
             should_quit: false,
+            pause_menu: PauseMenu::new(),
             player,
             world_renderer: WorldRenderer::new(block_material),
             skybox_mesh,
@@ -131,7 +136,7 @@ impl GameController {
         }
     }
 
-    pub fn run(&mut self, rl: &mut RaylibHandle, thread: &RaylibThread) {
+    pub fn run(&mut self, rl: &mut RaylibHandle, thread: &RaylibThread, settings: Settings) {
         while !self.should_quit {
             let frame_start = Instant::now();
 
@@ -139,7 +144,7 @@ impl GameController {
 
             if self.next_tick_in < 0_f32 {
                 let tick_start = Instant::now();
-                self.tick(rl);
+                self.tick(rl, &settings);
                 self.game_data.tick_counter += 1;
                 self.last_tick_time = tick_start.elapsed().as_secs_f32();
                 self.next_tick_in += TICK_LENGTH;
@@ -163,24 +168,21 @@ impl GameController {
         }
     }
 
-    pub fn tick(&mut self, rl: &mut RaylibHandle) {
+    pub fn tick(&mut self, rl: &mut RaylibHandle, settings: &Settings) {
         unsafe {
             raylib::ffi::PollInputEvents();
         }
 
         self.should_quit |= rl.window_should_close();
 
-        if self.paused {
-            if rl.is_key_pressed(KEY_ESCAPE) {
-                self.paused = false;
-            }
-        } else {
+        // Update pause menu
+        self.pause_menu.update(rl);
+        self.paused = !self.pause_menu.is_running();
+        self.should_quit |= self.pause_menu.should_quit();
+
+        if !self.paused {
             self.player
                 .process_tick(&mut self.game_data.player_data, rl);
-
-            if rl.is_key_pressed(KEY_ESCAPE) {
-                self.paused = true;
-            }
 
             // FIXME: implement saving menu (waiting on #58)
             // Q for save
@@ -241,7 +243,7 @@ impl GameController {
             }
 
             // Progressive chunk generation
-            self.generate_surrounding_chunks(1);
+            self.generate_surrounding_chunks(settings.render_distance);
 
             // Poll for generated chunks
             let chunk_gen_result = self.cgt.poll();
@@ -282,26 +284,25 @@ impl GameController {
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::LIGHTBLUE);
 
-        // Skybox
+        // Make sure to get the render order right!
 
+        // Skybox
         self.render_skybox(&mut d);
 
         // World
-
         self.world_renderer.render(&mut d, self.player.camera);
-
-        // Temporary Pause Display
-
-        if self.paused {
-            d.draw_text("paused", 40, 40, 100, Color::GRAY);
-        }
-
-        // Debug Info
-
-        self.render_debug(&mut d);
 
         // Crosshair
         GameController::draw_crosshair(&mut d);
+        
+        // Pause menu
+        if self.paused {
+            self.pause_menu.render(&mut d);
+        }
+
+        // Debug Info
+        self.render_debug(&mut d);
+
     }
 
     fn render_skybox(&mut self, d: &mut RaylibDrawHandle) {
@@ -367,8 +368,8 @@ impl GameController {
     }
 
     fn draw_crosshair(d: &mut RaylibDrawHandle) {
-        let w = d.get_screen_width();
-        let h = d.get_screen_height();
+        let w = d.get_render_width();
+        let h = d.get_render_height();
         d.draw_line_ex(
             rvec2(w / 2 - 10, h / 2),
             rvec2(w / 2 + 10, h / 2),
@@ -384,7 +385,7 @@ impl GameController {
         );
     }
 
-    pub fn generate_surrounding_chunks(&mut self, radius: i64) {
+    pub fn generate_surrounding_chunks(&mut self, render_distance: i64) {
         let Vector3 {
             x: px,
             y: py,
@@ -394,7 +395,7 @@ impl GameController {
 
         // Iterate from -radius to radius from lowest magnitude
         // Probably not the most efficient way to to do this
-        let mut delta = (-radius..=radius).collect::<Vec<i64>>();
+        let mut delta = (-render_distance..=render_distance).collect::<Vec<i64>>();
         delta.sort_by_key(|i| i.abs());
 
         for dx in &delta {
