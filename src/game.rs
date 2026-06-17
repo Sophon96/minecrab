@@ -385,6 +385,10 @@ impl GameController {
         );
     }
 
+    pub fn cleanup(self) {
+        self.cgt.join().unwrap();
+    }
+
     pub fn generate_surrounding_chunks(&mut self, render_distance: i64) {
         let Vector3 {
             x: px,

@@ -9,9 +9,6 @@ use player::PlayerData;
 use settings::Settings;
 use world::generation::World;
 
-
-
-
 const WINDOW_WIDTH: i32 = 1280;
 const WINDOW_HEIGHT: i32 = 720;
 
@@ -42,4 +39,6 @@ fn main() {
     let mut game = GameController::new(&mut rl, &thread, data);
 
     game.run(&mut rl, &thread, settings);
+
+    game.cleanup();
 }
