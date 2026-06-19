@@ -39,6 +39,11 @@ impl Player {
         Player { camera }
     }
 
+    pub fn reset_player(&mut self, pd: &PlayerData) {
+        self.camera.position = pd.pos;
+        self.camera.target = pd.fwd;
+    }
+
     pub fn update_camera(&mut self, pd: &mut PlayerData, interp: f32) {
         pd.pos = pd.prev_pos + (pd.next_pos - pd.prev_pos) * interp;
         self.camera.position = pd.pos;

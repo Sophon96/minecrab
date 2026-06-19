@@ -4,6 +4,8 @@ use raylib::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
@@ -14,6 +16,7 @@ use crate::world::blocks::BlockData;
 pub const CHUNK_SIZE: i64 = 32;
 
 pub struct ChunkGenThread {
+    should_exit: Arc<AtomicBool>,
     input_tx: Sender<(i64, i64, i64, Option<Chunk>)>,
     result_rx: Receiver<(i64, i64, i64, Option<Chunk>, VecMesh)>,
     chunk_gen_thread: JoinHandle<()>,
@@ -23,13 +26,16 @@ pub struct ChunkGenThread {
 
 impl ChunkGenThread {
     pub fn new(seed: u32) -> Self {
+        let should_exit = Arc::from(AtomicBool::new(false));
+        let remote_should_exit = Arc::clone(&should_exit);
         let (input_tx, input_rx) = mpsc::channel::<(i64, i64, i64, Option<Chunk>)>();
         let (result_tx, result_rx) = mpsc::channel::<(i64, i64, i64, Option<Chunk>, VecMesh)>();
         let chunk_gen_thread = thread::spawn(move || {
-            ChunkGenThread::remote_generate_terrain_chunk(seed, input_rx, result_tx);
+            ChunkGenThread::remote_generate_terrain_chunk(remote_should_exit, seed, input_rx, result_tx);
         });
 
         Self {
+            should_exit,
             input_tx,
             result_rx,
             chunk_gen_thread,
@@ -86,18 +92,27 @@ impl ChunkGenThread {
 
     /// Join this chunk generation thread
     pub fn join(self) -> Result<(), Box<dyn std::any::Any + Send + 'static>> {
-        // Drop input_tx to hang up and signal thread to terminate
+        // Drop input_tx to hang up and set exit signal to true to signal thread to terminate
+        // FIXME: what should order be?
+        self.should_exit.store(true, Ordering::Relaxed);
         std::mem::drop(self.input_tx);
         self.chunk_gen_thread.join()
     }
 
     fn remote_generate_terrain_chunk(
+        should_exit: Arc<AtomicBool>,
         seed: u32,
         input_rx: Receiver<(i64, i64, i64, Option<Chunk>)>,
         result_tx: Sender<(i64, i64, i64, Option<Chunk>, VecMesh)>,
     ) {
         eprintln!("Terrain generation chunk started");
         loop {
+            // Check if we should exit
+            if should_exit.load(Ordering::Relaxed) {
+                eprintln!("chunk gen thread: When I opened my eyes / To a soft and quiet world / I wonder just what it is I saw");
+                return;
+            }
+
             let Ok((cx, cy, cz, existing_chunk)) = input_rx.recv() else {
                 eprintln!("chunk gen thread: input channel hung up, goodbye.");
                 return;

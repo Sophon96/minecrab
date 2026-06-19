@@ -7,7 +7,7 @@ use std::time::Instant;
 use crate::player::{Player, PlayerData};
 use crate::render::mesh_tools::{MaterialBuilder, draw_mesh2};
 use crate::render::skybox;
-use crate::render::pause_menu::PauseMenu;
+use crate::render::pause_menu::{PauseMenu, PauseMenuState};
 use crate::render::worldmesh::WorldRenderer;
 use crate::world::blocks::BlockData;
 use crate::world::collision::{VoxelRaycastHit, voxel_raycast};
@@ -145,7 +145,6 @@ impl GameController {
             if self.next_tick_in < 0_f32 {
                 let tick_start = Instant::now();
                 self.tick(rl, &settings);
-                self.game_data.tick_counter += 1;
                 self.last_tick_time = tick_start.elapsed().as_secs_f32();
                 self.next_tick_in += TICK_LENGTH;
             }
@@ -168,6 +167,7 @@ impl GameController {
         }
     }
 
+    /// Updates that run at a fixed tick rate
     pub fn tick(&mut self, rl: &mut RaylibHandle, settings: &Settings) {
         unsafe {
             raylib::ffi::PollInputEvents();
@@ -175,46 +175,43 @@ impl GameController {
 
         self.should_quit |= rl.window_should_close();
 
-        // Update pause menu
-        self.pause_menu.update(rl);
-        self.paused = !self.pause_menu.is_running();
-        self.should_quit |= self.pause_menu.should_quit();
+        // Loading and saving
+        // XXX: This is at the top so that the loading screens can render once
+        // before the load/save (which takes a while) actually happens
+        // Q for save
+        if self.pause_menu.should_save() {
+            let buf = rmp_serde::to_vec(&self.game_data).expect("serialize failed");
+            fs::write("world.bin", buf).expect("writing save to file failed");
+
+            // reset pause menu state
+            self.pause_menu.set_state(rl, PauseMenuState::Paused);
+        }
+
+        // L for load
+        if self.pause_menu.should_load() {
+            // FIXME: implement proper error handling
+            let bytes = fs::read("world.bin").expect("reading save from file failed");
+            self.game_data = rmp_serde::from_slice(&bytes).expect("deserialize failed");
+
+            // Terminate old chunk gen thread and start new chunk gen thread
+            let new_cgt = ChunkGenThread::new(self.game_data.seed as u32);
+            std::mem::replace(&mut self.cgt, new_cgt).join().unwrap();
+
+            // reset world renderer
+            self.mesh_all_chunks();
+
+            // reset player camera
+            self.player.reset_player(&self.game_data.player_data);
+
+            // reset pause menu state
+            self.pause_menu.set_state(rl, PauseMenuState::Paused);
+        }
 
         if !self.paused {
+            self.game_data.tick_counter += 1;
+
             self.player
                 .process_tick(&mut self.game_data.player_data, rl);
-
-            // FIXME: implement saving menu (waiting on #58)
-            // Q for save
-            if rl.is_key_pressed(KeyboardKey::KEY_Q) {
-                let buf = rmp_serde::to_vec(&self.game_data).expect("serialize failed");
-                fs::write("world.bin", buf).expect("writing save to file failed");
-            }
-
-            // L for load
-            if rl.is_key_pressed(KeyboardKey::KEY_L) {
-                // FIXME: implement proper error handling
-                let bytes = fs::read("world.bin").expect("reading save from file failed");
-                self.game_data = rmp_serde::from_slice(&bytes).expect("deserialize failed");
-
-                // Terminate old chunk gen thread and start new chunk gen thread
-                let new_cgt = ChunkGenThread::new(self.game_data.seed as u32);
-                std::mem::replace(&mut self.cgt, new_cgt).join().unwrap();
-
-                // reset world renderer
-                self.mesh_all_chunks();
-            }
-
-            if rl.is_key_pressed(KEY_BACKSLASH) {
-                self.debug_info_shown = !self.debug_info_shown;
-
-                if self.debug_info_shown {
-                    &self.sounds.menu_open
-                } else {
-                    &self.sounds.menu_close
-                }
-                .play();
-            }
 
             if rl.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) {
                 let hit = self.hit_voxel_from_player();
@@ -241,43 +238,51 @@ impl GameController {
                     self.update_mesh_on_hit(h);
                 }
             }
+        }
 
-            // Progressive chunk generation
-            self.generate_surrounding_chunks(settings.render_distance);
+        // Update pause menu
+        self.pause_menu.update(rl);
+        self.paused = !self.pause_menu.is_running();
+        self.should_quit |= self.pause_menu.should_quit();
 
-            // Poll for generated chunks
-            let chunk_gen_result = self.cgt.poll();
-            if let Some(result) = chunk_gen_result {
-                if let Some(chunk) = result.3 {
-                    self.game_data
-                        .world
-                        .chunks
-                        .insert((result.0, result.1, result.2), chunk);
-                }
+        // Progressive chunk generation
+        self.generate_surrounding_chunks(settings.render_distance);
 
-                let mut mesh = result.4.to_mesh();
-                unsafe { mesh.upload(false) };
-                self.world_renderer
-                    .add_mesh(result.0, result.1, result.2, mesh);
+        // Poll for generated chunks
+        let chunk_gen_result = self.cgt.poll();
+        if let Some(result) = chunk_gen_result {
+            if let Some(chunk) = result.3 {
+                self.game_data
+                    .world
+                    .chunks
+                    .insert((result.0, result.1, result.2), chunk);
             }
+
+            let mut mesh = result.4.to_mesh();
+            unsafe { mesh.upload(false) };
+            self.world_renderer
+                .add_mesh(result.0, result.1, result.2, mesh);
+        }
+
+        if rl.is_key_pressed(KEY_BACKSLASH) {
+            self.debug_info_shown = !self.debug_info_shown;
 
             if self.debug_info_shown {
-                self.debug_text = self.debug_info_fmt();
+                &self.sounds.menu_open
+            } else {
+                &self.sounds.menu_close
             }
+            .play();
+        }
+
+        if self.debug_info_shown {
+            self.debug_text = self.debug_info_fmt();
         }
     }
 
+    /// Updates that run every frame
     pub fn update(&mut self) {
         self.update_camera();
-    }
-
-    pub fn update_camera(&mut self) {
-        // on a scale of zero to one, how close are we to the next tick.
-        let interp = 1. - (self.next_tick_in / TICK_LENGTH).clamp(0., 1.);
-        if !self.paused {
-            self.player
-                .update_camera(&mut self.game_data.player_data, interp);
-        }
     }
 
     pub fn render(&mut self, rl: &mut RaylibHandle, thread: &RaylibThread) {
@@ -303,6 +308,19 @@ impl GameController {
         // Debug Info
         self.render_debug(&mut d);
 
+    }
+
+    pub fn cleanup(self) {
+        self.cgt.join().unwrap();
+    }
+
+    fn update_camera(&mut self) {
+        // on a scale of zero to one, how close are we to the next tick.
+        let interp = 1. - (self.next_tick_in / TICK_LENGTH).clamp(0., 1.);
+        if !self.paused {
+            self.player
+                .update_camera(&mut self.game_data.player_data, interp);
+        }
     }
 
     fn render_skybox(&mut self, d: &mut RaylibDrawHandle) {
@@ -385,11 +403,7 @@ impl GameController {
         );
     }
 
-    pub fn cleanup(self) {
-        self.cgt.join().unwrap();
-    }
-
-    pub fn generate_surrounding_chunks(&mut self, render_distance: i64) {
+    fn generate_surrounding_chunks(&mut self, render_distance: i64) {
         let Vector3 {
             x: px,
             y: py,
@@ -416,7 +430,7 @@ impl GameController {
     }
 
     // FIXME: inline
-    pub fn mesh_all_chunks(&mut self) {
+    fn mesh_all_chunks(&mut self) {
         self.world_renderer.clear_meshes();
         for (k, v) in &self.game_data.world.chunks {
             self.cgt.dispatch_mesh_chunk(v, k.0, k.1, k.2);

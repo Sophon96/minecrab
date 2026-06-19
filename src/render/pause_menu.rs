@@ -12,6 +12,8 @@ const PAUSE_BG: Color = Color::new(0, 0, 0, 127);
 pub enum PauseButtonType {
     BackToGame,
     Quit,
+    Load,
+    Save,
     Video,
     VideoBack,
     VideoVsync,
@@ -26,6 +28,10 @@ impl PauseButtonType {
             PauseButtonType::Quit => "Quit",
             PauseButtonType::Video => "Video Settings",
 
+            // Load/save
+            PauseButtonType::Load => "Load",
+            PauseButtonType::Save => "Save",
+
             // Video sub-menu
             PauseButtonType::VideoBack => "Back",
             PauseButtonType::VideoVsync => "Toggle Vertical Sync",
@@ -37,6 +43,8 @@ impl PauseButtonType {
         Box::new(match self {
             PauseButtonType::BackToGame => |_| Some(PauseMenuState::Running),
             PauseButtonType::Quit => |_| Some(PauseMenuState::ShouldQuit),
+            PauseButtonType::Load => |_| Some(PauseMenuState::ShouldLoad),
+            PauseButtonType::Save => |_| Some(PauseMenuState::ShouldSave),
             PauseButtonType::Video => |_| Some(PauseMenuState::Video),
             PauseButtonType::VideoBack => |_| Some(PauseMenuState::Paused),
             PauseButtonType::VideoVsync => |rl| {
@@ -66,8 +74,10 @@ macro_rules! pb {
 pub enum PauseMenuState {
     Running,
     Paused,
-    Video,
     ShouldQuit,
+    ShouldLoad,
+    ShouldSave,
+    Video,
 }
 
 pub struct PauseMenu {
@@ -85,6 +95,7 @@ impl PauseMenu {
             state: PauseMenuState::Paused,
             root_element: Some(col!([
                 pb!(PauseButtonType::BackToGame),
+                row!([pb!(PauseButtonType::Load), pb!(PauseButtonType::Save)]),
                 pb!(PauseButtonType::Video),
                 pb!(PauseButtonType::Quit),
             ])),
@@ -97,7 +108,7 @@ impl PauseMenu {
         // pm.set_state(rl, state);
     }
 
-    fn set_state(&mut self, rl: &mut RaylibHandle, state: PauseMenuState) {
+    pub fn set_state(&mut self, rl: &mut RaylibHandle, state: PauseMenuState) {
         self.state = state;
         match state {
             PauseMenuState::Running => {
@@ -123,9 +134,16 @@ impl PauseMenu {
 
                 self.root_element = Some(col!([
                     pb!(PauseButtonType::BackToGame),
+                    row!([pb!(PauseButtonType::Load), pb!(PauseButtonType::Save)]),
                     pb!(PauseButtonType::Video),
                     pb!(PauseButtonType::Quit),
                 ]));
+            }
+            PauseMenuState::ShouldLoad => {
+                self.root_element = Some(button!("Loading save...", Box::new(|_| None)))
+            }
+            PauseMenuState::ShouldSave => {
+                self.root_element = Some(button!("Saving...", Box::new(|_| None)))
             }
             PauseMenuState::Video => {
                 self.root_element = Some(col!([
@@ -152,7 +170,9 @@ impl PauseMenu {
                 PauseMenuState::Video => {
                     self.set_state(rl, PauseMenuState::Paused);
                 }
-                PauseMenuState::ShouldQuit => {}
+                PauseMenuState::ShouldQuit
+                | PauseMenuState::ShouldLoad
+                | PauseMenuState::ShouldSave => {}
             }
             eprintln!("pause menu: pause toggled");
         }
@@ -208,5 +228,13 @@ impl PauseMenu {
 
     pub fn should_quit(&self) -> bool {
         self.state == PauseMenuState::ShouldQuit
+    }
+
+    pub fn should_load(&self) -> bool {
+        self.state == PauseMenuState::ShouldLoad
+    }
+
+    pub fn should_save(&self) -> bool {
+        self.state == PauseMenuState::ShouldSave
     }
 }
