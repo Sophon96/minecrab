@@ -178,7 +178,7 @@ impl GameController {
         // Loading and saving
         // XXX: This is at the top so that the loading screens can render once
         // before the load/save (which takes a while) actually happens
-        // Q for save
+        // Save
         if self.pause_menu.should_save() {
             let buf = rmp_serde::to_vec(&self.game_data).expect("serialize failed");
             fs::write("world.bin", buf).expect("writing save to file failed");
@@ -187,7 +187,7 @@ impl GameController {
             self.pause_menu.set_state(rl, PauseMenuState::Paused);
         }
 
-        // L for load
+        // Load
         if self.pause_menu.should_load() {
             // FIXME: implement proper error handling
             let bytes = fs::read("world.bin").expect("reading save from file failed");

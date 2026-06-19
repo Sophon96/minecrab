@@ -139,6 +139,7 @@ impl PauseMenu {
                     pb!(PauseButtonType::Quit),
                 ]));
             }
+            // FIXME: extend GUI to have text (among other components)
             PauseMenuState::ShouldLoad => {
                 self.root_element = Some(button!("Loading save...", Box::new(|_| None)))
             }
