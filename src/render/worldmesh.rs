@@ -1,7 +1,7 @@
 use raylib::prelude::*;
 use std::collections::HashMap;
 
-use crate::mesh_tools::{VecMesh, draw_mesh2};
+use crate::render::mesh_tools::{VecMesh, draw_mesh2};
 use crate::world::blocks::{BlockData, BlockTextureCoordinates};
 use crate::world::generation::{CHUNK_SIZE, Chunk};
 
@@ -166,6 +166,10 @@ impl WorldRenderer {
     pub fn add_mesh(&mut self, cx: i64, cy: i64, cz: i64, mesh: Mesh) {
         // Insert will overwrite the mesh based on their chunk index
         self.chunk_meshes.insert((cx, cy, cz), mesh);
+    }
+
+    pub fn clear_meshes(&mut self) {
+        self.chunk_meshes.clear();
     }
 
     pub fn render(&self, d: &mut RaylibDrawHandle, camera: Camera3D) {
